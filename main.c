@@ -2774,7 +2774,9 @@ main (int argc, char *argv[])
 
   lo.debug = opts.debug;
 
-  if (lo.upperdir != NULL)
+  if (lo.upperdir == NULL)
+    error (EXIT_FAILURE, 0, "upperdir not specified");
+  else
     {
       char full_path[PATH_MAX + 1];
 
@@ -2784,16 +2786,6 @@ main (int argc, char *argv[])
       lo.upperdir = strdup (full_path);
       if (lo.upperdir == NULL)
         goto err_out1;
-    }
-  else
-    {
-      char *up = strdup ("/tmp/containerfs.XXXXXX");
-      int ret = mkstemp (up);
-      if (ret < 0)
-        goto err_out1;
-
-      close (ret);
-      lo.upperdir = up;
     }
 
   printf ("UID=%i\n", lo.uid);
