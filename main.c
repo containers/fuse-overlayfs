@@ -2805,7 +2805,9 @@ main (int argc, char *argv[])
   lo.root_upper->lookups = 2;
   lo.root_upper->lowerdir = lo.root_lower;
 
-  if (lo.workdir)
+  if (lo.workdir == NULL)
+    error (EXIT_FAILURE, 0, "workdir not specified");
+  else
     {
       char path[PATH_MAX + 1];
 
