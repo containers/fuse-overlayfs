@@ -196,26 +196,39 @@ get_node_path (struct lo_node *node)
   return node->path;
 }
 
-static void
+static int
 hide_node (struct lo_data *lo, struct lo_node *node)
 {
+  char dest[PATH_MAX];
   char *src = node->path;
+  int ret;
 
   node->hidden = 1;
   node->parent = NULL;
 
-  node->path = tempnam (lo->workdir, NULL);
+  sprintf (dest, "%s/tmp-XXXXXX", lo->workdir);
+  ret = mkstemp (dest);
+  if (ret < 0)
+    return ret;
+
+  close (ret);
+
+  node->path = strdup (dest);
   if (node->path == NULL)
     {
+      unlink (dest);
       free (src);
-      return;
+      return -1;
     }
   if (rename (src, node->path) < 0)
     {
       free (src);
-      return;
+      return -1;
     }
+  free (src);
+
   node->do_unlink = 1;
+  return 0;
 }
 
 static int
@@ -1180,7 +1193,9 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             e.entry_timeout = ENTRY_TIMEOUT;
             e.ino = NODE_TO_INODE (node);
             if ((strcmp (name, ".") != 0) && (strcmp (name, "..") != 0))
-              node->lookups++;
+              {
+                node->lookups++;
+              }
             memcpy (&e.attr, &st, sizeof (st));
 
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
@@ -1502,9 +1517,11 @@ update_paths (struct lo_node *node)
   if (node->parent)
     {
       free (node->path);
-      node->path = NULL;
       if (asprintf (&node->path, "%s/%s", node->parent->path, node->name) < 0)
-        return -1;
+        {
+          node->path = NULL;
+          return -1;
+        }
     }
 
   if (node->children)
@@ -2372,12 +2389,16 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
           goto error;
         }
 
-      rm = hash_delete (destpnode->children, &key);
+      rm = hash_lookup (destpnode->children, &key);
       if (rm)
         {
-          hide_node (lo, rm);
-          node_free (rm);
+          if (hide_node (lo, rm) < 0)
+            goto error;
         }
+
+      hash_delete (destpnode->children, &key);
+      if (rm)
+        node_free (rm);
     }
 
   ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
@@ -2699,8 +2720,6 @@ main (int argc, char *argv[])
                        .lowerdir = NULL,
   };
   int ret = -1;
-
-  unsetenv ("TMPDIR");
 
   if (fuse_opt_parse (&args, &lo, lo_opts, fuse_opt_proc) == -1)
     return 1;
