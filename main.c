@@ -87,14 +87,6 @@ str_compare (const void *n1, const void *n2)
   return strcmp (s1, s2) == 0 ? true : false;
 }
 
-struct lo_dir
-{
-  struct lo_dir *next;
-  struct lo_dir *prev;
-  char *path;
-  int fd;
-};
-
 struct lo_node
 {
   struct lo_node *parent;
@@ -148,7 +140,7 @@ lo_data (fuse_req_t req)
 }
 
 /* Useful in a gdb session.  */
-static void
+void
 dump_directory (struct lo_node *node)
 {
   struct lo_node *it;
@@ -785,46 +777,6 @@ read_dirs (char *path, struct lo_node *lower, bool low)
     }
   free (buf);
   return root;
-}
-static void
-make_path (struct lo_node *node, const char *prefix, const char *suffix, char *b)
-{
-  struct lo_node *it;
-  struct
-  {
-    size_t l;
-    const char *p;
-  }
-  parts[PATH_MAX + 1];
-  size_t i = 0;
-
-  if (suffix)
-    {
-      parts[i].l = strlen (suffix);
-      parts[i].p = suffix;
-      i++;
-    }
-  for (it = node; it->parent; it = it->parent)
-    {
-      parts[i].l = strlen (it->name);
-      parts[i].p = it->name;
-      i++;
-    }
-  if (prefix)
-    {
-      if (*prefix == '/')
-        prefix++;
-      parts[i].l = strlen (prefix);
-      parts[i].p = prefix;
-      i++;
-    }
-  for (; i > 0; i--)
-    {
-      *b++ = '/';
-      memcpy (b, parts[i - 1].p, parts[i - 1].l);
-      b += parts[i - 1].l;
-    }
-  *b = '\0';
 }
 
 static struct lo_node *
@@ -2308,7 +2260,6 @@ unhide_node (struct lo_node *node, struct lo_node *parent)
 static struct lo_node *
 get_node_up_rec (struct lo_data *lo, struct lo_node *node)
 {
-  int ret;
   struct lo_node *it;
   struct lo_node *l;
 
@@ -2473,7 +2424,6 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   else
     {
       int fd;
-      struct lo_node *rm;
 
       sprintf (path, ".wh.%s", name);
       fd = openat (srcfd, path, O_CREAT, 0700);
