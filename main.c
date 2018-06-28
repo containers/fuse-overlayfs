@@ -200,7 +200,7 @@ static int
 hide_node (struct lo_data *lo, struct lo_node *node)
 {
   char dest[PATH_MAX];
-  char *src = node->path;
+  char *newpath;
   int ret;
 
   node->hidden = 1;
@@ -213,19 +213,20 @@ hide_node (struct lo_data *lo, struct lo_node *node)
 
   close (ret);
 
-  node->path = strdup (dest);
-  if (node->path == NULL)
+  newpath = strdup (dest);
+  if (newpath == NULL)
     {
       unlink (dest);
-      free (src);
       return -1;
     }
-  if (rename (src, node->path) < 0)
+  if (rename (node->path, newpath) < 0)
     {
-      free (src);
+      free (newpath);
+      unlink (dest);
       return -1;
     }
-  free (src);
+  free (node->path);
+  node->path = newpath;
 
   node->do_unlink = 1;
   return 0;
@@ -312,6 +313,7 @@ node_free (void *p)
 
       for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
         it->parent = NULL;
+
       hash_free (n->children);
       n->children = NULL;
     }
@@ -325,9 +327,7 @@ node_free (void *p)
     }
 
   free (n->name);
-  n->name = NULL;
   free (n->path);
-  n->path = NULL;
   free (n);
 }
 
@@ -442,14 +442,22 @@ insert_node (struct lo_node *parent, struct lo_node *item, bool replace)
   int ret;
 
   if (prev_parent)
-    hash_delete (prev_parent->children, item);
+    {
+      if (hash_lookup (prev_parent->children, item) == item)
+        hash_delete (prev_parent->children, item);
+    }
 
   if (replace)
-    hash_delete (parent->children, item);
+    {
+      old = hash_delete (parent->children, item);
+      if (old)
+        node_free (old);
+    }
 
   ret = hash_insert_if_absent (parent->children, item, (const void **) &old);
   if (ret < 0)
     {
+      node_free (item);
       errno = ENOMEM;
       return NULL;
     }
@@ -506,7 +514,8 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
               if (n == NULL)
                 goto err;
               parent = (struct lo_node *) ent->fts_parent->fts_pointer;
-              if (insert_node (parent, n, false) == NULL)
+              n = insert_node (parent, n, false);
+              if (n == NULL)
                 goto err;
               n->low = low ? 1 : 0;
             }
@@ -524,7 +533,8 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
             goto err;
           n->low = low ? 1 : 0;
           parent = (struct lo_node *) ent->fts_parent->fts_pointer;
-          if (insert_node (parent, n, true) == NULL)
+          n = insert_node (parent, n, true);
+          if (n == NULL)
             goto err;
           break;
         }
@@ -569,7 +579,8 @@ merge_trees (struct lo_node *origin, struct lo_node *new)
 
   if (!node_dirp (origin) || !node_dirp (new))
     {
-      if (insert_node (origin->parent, new, true) == NULL)
+      new = insert_node (origin->parent, new, true);
+      if (new == NULL)
         return NULL;
       return origin;
     }
@@ -612,7 +623,8 @@ merge_trees (struct lo_node *origin, struct lo_node *new)
       else
         {
           hash_delete (new->children, it);
-          if (insert_node (origin, it, true) == NULL)
+          it = insert_node (origin, it, true);
+          if (it == NULL)
             {
               free (children);
               return NULL;
@@ -653,11 +665,17 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
   n->lowerdir = lowerdir;
   dp = opendir (path);
   if (dp == NULL)
-    return NULL;
+    {
+      if (created)
+        node_free (created);
+      return NULL;
+    }
 
   whiteouts = hash_initialize (10, NULL, str_hasher, str_compare, free);
   if (whiteouts == NULL)
     {
+      if (created)
+        node_free (created);
       closedir (dp);
       errno = ENOMEM;
       return NULL;
@@ -692,6 +710,8 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
               errno = ENOMEM;
               closedir (dp);
               hash_free (whiteouts);
+              if (created)
+                node_free (created);
               return NULL;
             }
           tmp = hash_insert (whiteouts, name);
@@ -701,6 +721,8 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
               errno = ENOMEM;
               closedir (dp);
               hash_free (whiteouts);
+              if (created)
+                node_free (created);
               return NULL;
             }
           continue;
@@ -716,11 +738,9 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
       if (dirp)
         child->dirty = 1;
 
-      if (insert_node (n, child, false) == NULL)
-        {
-          node_free (child);
-          goto err;
-        }
+      child = insert_node (n, child, false);
+      if (child == NULL)
+        goto err;
     }
   closedir (dp);
 
@@ -1000,6 +1020,7 @@ lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
           i = hash_insert (d->elements, el);
           if (i == NULL)
             {
+              free (el);
               errno = ENOMEM;
               goto out_errno;
             }
@@ -1792,16 +1813,17 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
         {
           p->dirty = 1;
           errno = ENOMEM;
+          close (fd);
           return -1;
         }
-      if (insert_node (p, n, true) == NULL)
+      n = insert_node (p, n, true);
+      if (n == NULL)
         {
           p->dirty = 1;
-          node_free (n);
           errno = ENOMEM;
+          close (fd);
           return -1;
         }
-
       return fd;
     }
 
@@ -2142,9 +2164,10 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
       fuse_reply_err (req, ENOMEM);
       return;
     }
-  if (insert_node (newparentnode, node, true) == NULL)
+
+  node = insert_node (newparentnode, node, true);
+  if (node == NULL)
     {
-      node_free (node);
       fuse_reply_err (req, ENOMEM);
       return;
     }
@@ -2219,9 +2242,10 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
       fuse_reply_err (req, ENOMEM);
       return;
     }
-  if (insert_node (pnode, node, true) == NULL)
+
+  node = insert_node (pnode, node, true);
+  if (node == NULL)
     {
-      node_free (node);
       fuse_reply_err (req, ENOMEM);
       return;
     }
@@ -2242,9 +2266,9 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
   fuse_reply_entry (req, &e);
 }
 
-static
-void lo_flock (fuse_req_t req, fuse_ino_t ino,
-               struct fuse_file_info *fi, int op)
+static void
+lo_flock (fuse_req_t req, fuse_ino_t ino,
+          struct fuse_file_info *fi, int op)
 {
   int ret, fd;
 
@@ -2259,19 +2283,19 @@ void lo_flock (fuse_req_t req, fuse_ino_t ino,
 }
 
 /* used to recover a failed lo_rename.  */
-static void
+static struct lo_node *
 unhide_node (struct lo_node *node, struct lo_node *parent)
 {
   char b[PATH_MAX];
 
   if (node->path == NULL)
-    return;
+    return node;
 
   sprintf (b, "%s/%s", parent->path, node->name);
   rename (node->path, b);
   free (node->path);
   node->path = strdup (b);
-  insert_node (parent, node, true);
+  return insert_node (parent, node, true);
 }
 
 static struct lo_node *
@@ -2394,18 +2418,16 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
         {
           if (hide_node (lo, rm) < 0)
             goto error;
+          hash_delete (destpnode->children, rm);
+          node_free (rm);
         }
-
-      hash_delete (destpnode->children, &key);
-      if (rm)
-        node_free (rm);
     }
 
   ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
   if (ret < 0)
     {
       if (rm)
-        unhide_node (rm, destpnode);
+        destpnode = unhide_node (rm, destpnode);
 
       pnode->dirty = destpnode->dirty = 1;
       goto error;
@@ -2427,13 +2449,15 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       node->name = destnode->name;
       destnode->name = tmp;
 
-      if (insert_node (destpnode, node, true) == NULL)
+      node = insert_node (destpnode, node, true);
+      if (node == NULL)
         {
           node_free (rm1);
           node_free (rm2);
           goto error;
         }
-      if (insert_node (pnode, destnode, true) == NULL)
+      destnode = insert_node (pnode, destnode, true);
+      if (destnode == NULL)
         {
           node_free (rm1);
           node_free (rm2);
@@ -2452,15 +2476,15 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
         goto error;
       close (fd);
 
-      key.name = (char *) name;
-      hash_delete (pnode->children, &key);
+      hash_delete (pnode->children, node);
 
       free (node->name);
       node->name = strdup (newname);
       if (node->name == NULL)
         goto error;
 
-      if (insert_node (destpnode, node, true) == NULL)
+      node = insert_node (destpnode, node, true);
+      if (node == NULL)
         goto error;
       if (update_paths (node) < 0)
         goto error;
@@ -2608,9 +2632,10 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, ENOMEM);
       return;
     }
-  if (insert_node (pnode, node, true) == NULL)
+
+  node = insert_node (pnode, node, true);
+  if (node == NULL)
     {
-      node_free (node);
       fuse_reply_err (req, ENOMEM);
       return;
     }
