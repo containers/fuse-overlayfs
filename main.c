@@ -1169,7 +1169,7 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
       return;
     }
   p = buffer;
-  while (remaining > 0 && offset < d->tbl_size)
+  for (;remaining > 0 && offset < d->tbl_size; offset++)
       {
         int ret;
         size_t entsize;
@@ -1187,19 +1187,13 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             if (node->parent)
               node = node->parent;
             else
-              {
-                offset++;
-                continue;
-              }
+              continue;
           }
         else
           {
             node = do_lookup_file (lo, ino, name);
             if (node == NULL)
-              {
-                offset++;
-                continue;
-              }
+              continue;
           }
 
         ret = rpl_stat (req, node, &st);
@@ -1219,19 +1213,21 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             e.attr_timeout = ATTR_TIMEOUT;
             e.entry_timeout = ENTRY_TIMEOUT;
             e.ino = NODE_TO_INODE (node);
-            if ((strcmp (name, ".") != 0) && (strcmp (name, "..") != 0))
-              node->lookups++;
             memcpy (&e.attr, &st, sizeof (st));
 
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
-          }
 
-        p += entsize;
-        offset++;
+            if (entsize <= remaining)
+              {
+                if ((strcmp (name, ".") != 0) && (strcmp (name, "..") != 0))
+                  node->lookups++;
+              }
+          }
 
         if (entsize > remaining)
           break;
 
+        p += entsize;
         remaining -= entsize;
       }
   fuse_reply_buf (req, buffer, size - remaining);
