@@ -329,6 +329,7 @@ node_free (void *p)
   free (n->name);
   free (n->path);
   free (n);
+  return;
 }
 
 static void
@@ -726,6 +727,11 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
               return NULL;
             }
           continue;
+        }
+      else
+        {
+          if (hash_lookup (n->children, &key))
+            continue;
         }
 
       child = make_lo_node (b, dent->d_name, dirp);
@@ -1214,9 +1220,7 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             e.entry_timeout = ENTRY_TIMEOUT;
             e.ino = NODE_TO_INODE (node);
             if ((strcmp (name, ".") != 0) && (strcmp (name, "..") != 0))
-              {
-                node->lookups++;
-              }
+              node->lookups++;
             memcpy (&e.attr, &st, sizeof (st));
 
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
@@ -2416,10 +2420,17 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       rm = hash_lookup (destpnode->children, &key);
       if (rm)
         {
-          if (hide_node (lo, rm) < 0)
-            goto error;
           hash_delete (destpnode->children, rm);
-          node_free (rm);
+          if (rm->lookups > 0)
+            node_free (rm);
+          else
+            {
+              node_free (rm);
+              rm = NULL;
+            }
+
+          if (rm && hide_node (lo, rm) < 0)
+            goto error;
         }
     }
 
