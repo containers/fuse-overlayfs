@@ -87,6 +87,14 @@ str_compare (const void *n1, const void *n2)
   return strcmp (s1, s2) == 0 ? true : false;
 }
 
+struct lo_mapping
+{
+  struct lo_mapping *next;
+  unsigned int host;
+  unsigned int to;
+  unsigned int len;
+};
+
 struct lo_node
 {
   struct lo_node *parent;
@@ -107,8 +115,10 @@ struct lo_data
 {
   struct fuse_session *se;
   int debug;
-  int uid;
-  int gid;
+  char *uid_str;
+  char *gid_str;
+  struct lo_mapping *uid_mappings;
+  struct lo_mapping *gid_mappings;
   char *lowerdir;
   char *context;
   char *upperdir;
@@ -126,10 +136,10 @@ static const struct fuse_opt lo_opts[] = {
    offsetof (struct lo_data, upperdir), 0},
   {"workdir=%s",
    offsetof (struct lo_data, workdir), 0},
-  {"uid=%i",
-   offsetof (struct lo_data, uid), -1},
-  {"gid=%i",
-   offsetof (struct lo_data, gid), -1},
+  {"uid=%s",
+   offsetof (struct lo_data, uid_str), 0},
+  {"gid=%s",
+   offsetof (struct lo_data, gid_str), 0},
   FUSE_OPT_END
 };
 
@@ -137,6 +147,61 @@ static struct lo_data *
 lo_data (fuse_req_t req)
 {
   return (struct lo_data *) fuse_req_userdata (req);
+}
+
+static struct lo_mapping *
+read_mappings (const char *str)
+{
+  char *buf = NULL, *saveptr = NULL, *it;
+  struct lo_mapping *tmp, *ret = NULL;
+  unsigned int a, b, c;
+  int state = 0;
+
+  buf = alloca (strlen (str) + 1);
+  strcpy (buf, str);
+
+  for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
+    {
+      switch (state)
+        {
+        case 0:
+          a = strtol (it, NULL, 10);
+          state++;
+          break;
+
+        case 1:
+          b = strtol (it, NULL, 10);
+          state++;
+          break;
+
+        case 2:
+          c = strtol (it, NULL, 10);
+          state = 0;
+
+          tmp = malloc (sizeof (*tmp));
+          if (tmp == NULL)
+            return NULL;
+          tmp->next = ret;
+          tmp->host = a;
+          tmp->to = b;
+          tmp->len = c;
+          ret = tmp;
+          break;
+        }
+    }
+
+  return ret;
+}
+
+static void
+free_mapping (struct lo_mapping *it)
+{
+  struct lo_mapping *next = NULL;
+  for (; it; it = next)
+    {
+      next = it->next;
+      free (it);
+    }
 }
 
 /* Useful in a gdb session.  */
@@ -163,23 +228,6 @@ lo_init (void *userdata, struct fuse_conn_info *conn)
 {
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_MOVE;
   conn->want &= ~FUSE_CAP_PARALLEL_DIROPS;
-}
-
-/* FIXME: support proper ID ranges.  */
-static uid_t
-get_uid (struct lo_data *lo, uid_t id)
-{
-  if (lo->uid == id)
-    return geteuid ();
-  return id;
-}
-
-static uid_t
-get_gid (struct lo_data *lo, gid_t id)
-{
-  if (lo->gid == id)
-    return getegid ();
-  return id;
 }
 
 static inline bool
@@ -232,6 +280,39 @@ hide_node (struct lo_data *lo, struct lo_node *node)
   return 0;
 }
 
+static unsigned int
+find_mapping (unsigned int id, struct lo_mapping *mapping, bool direct)
+{
+  if (mapping == NULL)
+    return id;
+  for (; mapping; mapping = mapping->next)
+    {
+      if (direct)
+        {
+          if (id >= mapping->host && id < mapping->host + mapping->len)
+            return mapping->to + (id - mapping->host);
+        }
+      else
+        {
+          if (id >= mapping->to && id < mapping->to + mapping->len)
+            return mapping->host + (id - mapping->to);
+        }
+    }
+    return 65534;
+}
+
+static uid_t
+get_uid (struct lo_data *data, uid_t id)
+{
+  return find_mapping (id, data->uid_mappings, false);
+}
+
+static uid_t
+get_gid (struct lo_data *data, gid_t id)
+{
+  return find_mapping (id, data->gid_mappings, false);
+}
+
 static int
 rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
 {
@@ -246,11 +327,8 @@ rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
   if (ret < 0)
     return ret;
 
-  if (data->uid >= 0)
-    st->st_uid = data->uid;
-  if (data->gid >= 0)
-    st->st_gid = data->gid;
-
+  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true);
+  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true);
 
   st->st_ino = NODE_TO_INODE (node);
 
@@ -838,7 +916,7 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *path)
   if (*path == '\0')
     return node;
 
-  b = alloca (strlen (path));
+  b = alloca (strlen (path) + 1);
   strcpy (b, path);
 
   for (it = strtok_r (b, "/", &saveptr); it; it = strtok_r (NULL, "/", &saveptr))
@@ -2745,8 +2823,10 @@ main (int argc, char *argv[])
   struct fuse_session *se;
   struct fuse_cmdline_opts opts;
   struct lo_data lo = {.debug = 0,
-                       .uid = -1,
-                       .gid = -1,
+                       .uid_mappings = NULL,
+                       .gid_mappings = NULL,
+                       .uid_str = NULL,
+                       .gid_str = NULL,
                        .root_lower = NULL,
                        .root_upper = NULL,
                        .lowerdir = NULL,
@@ -2789,12 +2869,15 @@ main (int argc, char *argv[])
         goto err_out1;
     }
 
-  printf ("UID=%i\n", lo.uid);
-  printf ("GID=%i\n", lo.gid);
+  printf ("UID=%s\n", lo.uid_str ? : "unchanged");
+  printf ("GID=%s\n", lo.gid_str ? : "unchanged");
   printf ("UPPERDIR=%s\n", lo.upperdir);
   printf ("WORKDIR=%s\n", lo.workdir);
   printf ("LOWERDIR=%s\n", lo.lowerdir);
   printf ("MOUNTPOINT=%s\n", opts.mountpoint);
+
+  lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
+  lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
 
   lo.root_lower = read_dirs (lo.lowerdir, NULL, true);
   if (lo.root_lower == NULL)
@@ -2843,6 +2926,9 @@ err_out1:
 
   node_free (lo.root_lower);
   node_free (lo.root_upper);
+
+  free_mapping (lo.uid_mappings);
+  free_mapping (lo.gid_mappings);
 
   free (opts.mountpoint);
   fuse_opt_free_args (&args);
