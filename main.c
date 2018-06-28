@@ -2503,7 +2503,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               rm = NULL;
             }
 
-          if (rm && hide_node (lo, rm) < 0)
+          if (rm && !rm->not_exists && hide_node (lo, rm) < 0)
             goto error;
         }
     }
