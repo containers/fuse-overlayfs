@@ -2433,6 +2433,12 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       return;
     }
 
+  if (node_dirp (node) && node->lowerdir)
+    {
+      fuse_reply_err (req, EXDEV);
+      return;
+    }
+
   pnode = node->parent;
 
   destpnode = do_lookup_file (lo, newparent, NULL);
