@@ -245,34 +245,42 @@ get_node_path (struct lo_node *node)
 }
 
 static int
-hide_node (struct lo_data *lo, struct lo_node *node)
+hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
   char *newpath;
-  int ret;
+  static unsigned long counter = 1;
 
   node->hidden = 1;
   node->parent = NULL;
 
-  sprintf (dest, "%s/tmp-XXXXXX", lo->workdir);
-  ret = mkstemp (dest);
-  if (ret < 0)
-    return ret;
-
-  close (ret);
-
-  newpath = strdup (dest);
+  asprintf (&newpath, "%s/%lu", lo->workdir, counter++);
   if (newpath == NULL)
     {
       unlink (dest);
       return -1;
     }
-  if (rename (node->path, newpath) < 0)
+
+  /* Might be leftover from a previous run.  */
+  unlink (newpath);
+
+  if (unlink_src)
     {
-      free (newpath);
-      unlink (dest);
-      return -1;
+      if (rename (node->path, newpath) < 0)
+        {
+          free (newpath);
+          return -1;
+        }
     }
+  else
+    {
+      if (link (node->path, newpath) < 0)
+        {
+          free (newpath);
+          return -1;
+        }
+    }
+
   free (node->path);
   node->path = newpath;
 
@@ -1733,7 +1741,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   rm = hash_delete (pnode->children, &key);
   if (rm)
     {
-      hide_node (lo, rm);
+      hide_node (lo, rm, true);
       node_free (rm);
     }
 
@@ -2360,22 +2368,6 @@ lo_flock (fuse_req_t req, fuse_ino_t ino,
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
-/* used to recover a failed lo_rename.  */
-static struct lo_node *
-unhide_node (struct lo_node *node, struct lo_node *parent)
-{
-  char b[PATH_MAX];
-
-  if (node->path == NULL)
-    return node;
-
-  sprintf (b, "%s/%s", parent->path, node->name);
-  rename (node->path, b);
-  free (node->path);
-  node->path = strdup (b);
-  return insert_node (parent, node, true);
-}
-
 static struct lo_node *
 get_node_up_rec (struct lo_data *lo, struct lo_node *node)
 {
@@ -2503,7 +2495,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               rm = NULL;
             }
 
-          if (rm && !rm->not_exists && hide_node (lo, rm) < 0)
+          if (rm && !rm->not_exists && hide_node (lo, rm, false) < 0)
             goto error;
         }
     }
@@ -2511,9 +2503,6 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
   if (ret < 0)
     {
-      if (rm)
-        destpnode = unhide_node (rm, destpnode);
-
       pnode->dirty = destpnode->dirty = 1;
       goto error;
     }
