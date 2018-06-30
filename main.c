@@ -46,6 +46,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <fts.h>
+#include <sys/sysmacros.h>
 
 #include <sys/xattr.h>
 
@@ -577,7 +578,9 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
   struct lo_node *root, *n, *parent;
   int ret = -1;
   char *const dirs[] = {dir, NULL};
-  FTS *fts = fts_open (dirs, FTS_NOSTAT | FTS_COMFOLLOW, NULL);
+  const char *name;
+  char tmp[PATH_MAX + 4];
+  FTS *fts = fts_open (dirs, FTS_COMFOLLOW, NULL);
   if (fts == NULL)
     return NULL;
 
@@ -624,7 +627,18 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
         case FTS_SL:
         case FTS_SLNONE:
         case FTS_DEFAULT:
-          n = make_lo_node (ent->fts_path, ent->fts_name, false);
+          name = ent->fts_name;
+          if ((ent->fts_statp->st_mode & S_IFMT) == S_IFCHR)
+            {
+              if (major (ent->fts_statp->st_rdev) == 0
+                  && minor (ent->fts_statp->st_rdev) == 0)
+                {
+                  sprintf (tmp, ".wh.%s", ent->fts_name);
+                  name = tmp;
+                }
+            }
+
+          n = make_lo_node (ent->fts_path, name, false);
           if (n == NULL)
             goto err;
           n->low = low ? 1 : 0;
