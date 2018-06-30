@@ -152,7 +152,7 @@ lo_data (fuse_req_t req)
 static struct lo_mapping *
 read_mappings (const char *str)
 {
-  char *buf = NULL, *saveptr = NULL, *it;
+  char *buf = NULL, *saveptr = NULL, *it, *endptr;
   struct lo_mapping *tmp, *ret = NULL;
   unsigned int a, b, c;
   int state = 0;
@@ -165,17 +165,23 @@ read_mappings (const char *str)
       switch (state)
         {
         case 0:
-          a = strtol (it, NULL, 10);
+          a = strtol (it, &endptr, 10);
+          if (*endptr != 0)
+            error (EXIT_FAILURE, 0, "invalid mapping specified: %s", str);
           state++;
           break;
 
         case 1:
-          b = strtol (it, NULL, 10);
+          b = strtol (it, &endptr, 10);
+          if (*endptr != 0)
+            error (EXIT_FAILURE, 0, "invalid mapping specified: %s", str);
           state++;
           break;
 
         case 2:
-          c = strtol (it, NULL, 10);
+          c = strtol (it, &endptr, 10);
+          if (*endptr != 0)
+            error (EXIT_FAILURE, 0, "invalid mapping specified: %s", str);
           state = 0;
 
           tmp = malloc (sizeof (*tmp));
@@ -189,6 +195,9 @@ read_mappings (const char *str)
           break;
         }
     }
+
+  if (state != 0)
+    error (EXIT_FAILURE, 0, "invalid mapping specified: %s", str);
 
   return ret;
 }
