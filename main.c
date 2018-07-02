@@ -71,22 +71,13 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
-static size_t
-str_hasher (const void *p, size_t s)
+struct lo_layer
 {
-  const char *str = (const char *) p;
-
-  return hash_string (str, s);
-}
-
-static bool
-str_compare (const void *n1, const void *n2)
-{
-  const char *s1 = (const char *) n1;
-  const char *s2 = (const char *) n2;
-
-  return strcmp (s1, s2) == 0 ? true : false;
-}
+  struct lo_layer *next;
+  char *path;
+  int fd;
+  int low;
+};
 
 struct lo_mapping
 {
@@ -99,18 +90,20 @@ struct lo_mapping
 struct lo_node
 {
   struct lo_node *parent;
-  struct lo_node *lowerdir;
   Hash_table *children;
+  struct lo_layer *layer;
   char *path;
   char *name;
   int lookups;
   ino_t ino;
+  int rmfrom;
+
+  unsigned int present_lowerdir : 1;
   unsigned int dirty : 1;
-  unsigned int low : 1;
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
   unsigned int hidden : 1;
-  unsigned int not_exists : 1;
+  unsigned int whiteout : 1;
 };
 
 struct lo_data
@@ -125,6 +118,9 @@ struct lo_data
   char *context;
   char *upperdir;
   char *workdir;
+  int workdir_fd;
+  struct lo_layer *layers;
+
   struct lo_node *root_lower;
   struct lo_node *root_upper;
 };
@@ -241,18 +237,41 @@ lo_init (void *userdata, struct fuse_conn_info *conn)
   conn->want &= ~FUSE_CAP_PARALLEL_DIROPS;
 }
 
+static struct lo_layer *
+get_upper_layer (struct lo_data *lo)
+{
+  return lo->layers;
+}
+
 static inline bool
 node_dirp (struct lo_node *n)
 {
   return n->children != NULL;
 }
 
-static char *
-get_node_path (struct lo_node *node)
+static int
+node_dirfd (struct lo_node *n)
 {
-  if (node->not_exists)
-    return node->lowerdir->path;
-  return node->path;
+  if (n->hidden)
+    return n->rmfrom;
+  return n->layer->fd;
+}
+
+static bool
+has_prefix (const char *str, const char *pref)
+{
+  while (1)
+    {
+      if (*pref == '\0')
+        return true;
+      if (*str == '\0')
+        return false;
+      if (*pref != *str)
+        return false;
+      str++;
+      pref++;
+    }
+  return false;
 }
 
 static int
@@ -262,10 +281,7 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
   char *newpath;
   static unsigned long counter = 1;
 
-  node->hidden = 1;
-  node->parent = NULL;
-
-  asprintf (&newpath, "%s/%lu", lo->workdir, counter++);
+  asprintf (&newpath, "%lu", counter++);
   if (newpath == NULL)
     {
       unlink (dest);
@@ -273,11 +289,11 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
     }
 
   /* Might be leftover from a previous run.  */
-  unlink (newpath);
+  unlinkat (lo->workdir_fd, newpath, 0);
 
   if (unlink_src)
     {
-      if (rename (node->path, newpath) < 0)
+      if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
         {
           free (newpath);
           return -1;
@@ -285,17 +301,22 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
     }
   else
     {
-      if (link (node->path, newpath) < 0)
+      if (linkat (node_dirfd (node), node->path, lo->workdir_fd, newpath, 0) < 0)
         {
           free (newpath);
           return -1;
         }
     }
-
+  node->rmfrom = lo->workdir_fd;
   free (node->path);
   node->path = newpath;
+  node->hidden = 1;
+  node->parent = NULL;
 
-  node->do_unlink = 1;
+  if (node_dirp (node))
+    node->do_rmdir = 1;
+  else
+    node->do_unlink = 1;
   return 0;
 }
 
@@ -332,33 +353,20 @@ get_gid (struct lo_data *data, gid_t id)
   return find_mapping (id, data->gid_mappings, false);
 }
 
-static ino_t
-get_inode_number (struct lo_node *node)
-{
-  if (node->lowerdir)
-    return node->lowerdir->ino;
-
-  return node->ino;
-}
-
 static int
 rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
 {
   int ret;
   struct lo_data *data = lo_data (req);
 
-  if (! node->not_exists)
-    ret = lstat (node->path, st);
-  else
-    ret = lstat (node->lowerdir->path, st);
-
+  ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
   if (ret < 0)
     return ret;
 
   st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true);
   st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true);
 
-  st->st_ino = get_inode_number (node);
+  st->st_ino = node->ino;
   if (ret == 0 && node_dirp (node))
     {
       struct lo_node *it;
@@ -369,14 +377,6 @@ rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
         {
           if (node_dirp (it))
             st->st_nlink++;
-        }
-      if (node->lowerdir)
-        {
-          for (it = hash_get_first (node->lowerdir->children); it; it = hash_get_next (node->lowerdir->children, it))
-            {
-              if (node_dirp (it) && it->lowerdir == NULL)
-                st->st_nlink++;
-            }
         }
     }
 
@@ -423,13 +423,10 @@ node_free (void *p)
       n->children = NULL;
     }
 
-  if (! n->not_exists)
-    {
-      if (n->do_unlink)
-        unlink (n->path);
-      if (n->do_rmdir)
-        rmdir (n->path);
-    }
+  if (n->do_unlink)
+    unlinkat (n->rmfrom, n->path, 0);
+  if (n->do_rmdir)
+    unlinkat (n->rmfrom, n->path, AT_REMOVEDIR);
 
   free (n->name);
   free (n->path);
@@ -446,8 +443,6 @@ do_forget (fuse_ino_t ino, uint64_t nlookup)
     return;
 
   n = (struct lo_node *) ino;
-  if (n->low)
-    return;
 
   n->lookups -= nlookup;
   if (n->lookups <= 0)
@@ -472,12 +467,6 @@ node_hasher (const void *p, size_t s)
 }
 
 static bool
-file_exists_p (const char *path)
-{
-  return access (path, R_OK) == F_OK;
-}
-
-static bool
 node_compare (const void *n1, const void *n2)
 {
   struct lo_node *node1 = (struct lo_node *) n1;
@@ -487,7 +476,27 @@ node_compare (const void *n1, const void *n2)
 }
 
 static struct lo_node *
-make_lo_node (const char *path, const char *name, ino_t ino, bool dir_p)
+make_whiteout_node (const char *name)
+{
+  struct lo_node *ret = calloc (1, sizeof (*ret));
+  if (ret == NULL)
+    {
+      errno = ENOMEM;
+      return NULL;
+    }
+  ret->name = strdup (name);
+  if (ret->name == NULL)
+    {
+      free (ret);
+      errno = ENOMEM;
+      return NULL;
+    }
+  ret->whiteout = 1;
+  return ret;
+}
+
+static struct lo_node *
+make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t ino, bool dir_p)
 {
   struct lo_node *ret = malloc (sizeof (*ret));
   if (ret == NULL)
@@ -496,30 +505,27 @@ make_lo_node (const char *path, const char *name, ino_t ino, bool dir_p)
       return NULL;
     }
 
-  ret->lowerdir = NULL;
   ret->parent = NULL;
-  ret->dirty = 0;
-  ret->low = 0;
   ret->lookups = 0;
   ret->do_unlink = 0;
   ret->hidden = 0;
   ret->do_rmdir = 0;
-  ret->not_exists = 0;
-  if (ino == 0)
-    {
-      struct stat st;
-      if (stat (path, &st) == 0)
-        ino = st.st_ino;
-    }
+  ret->whiteout = 0;
+  ret->layer = layer;
   ret->ino = ino;
-
+  ret->present_lowerdir = 0;
   ret->name = strdup (name);
+  ret->rmfrom = 0;
+  ret->dirty = 1;
   if (ret->name == NULL)
     {
       free (ret);
       errno = ENOMEM;
       return NULL;
     }
+
+  if (has_prefix (path, "./") && path[2])
+    path += 2;
 
   ret->path = strdup (path);
   if (ret->path == NULL)
@@ -542,6 +548,18 @@ make_lo_node (const char *path, const char *name, ino_t ino, bool dir_p)
           free (ret);
           errno = ENOMEM;
           return NULL;
+        }
+    }
+
+  if (ret->ino == 0)
+    {
+      struct stat st;
+      struct lo_layer *it;
+
+      for (it = layer; it; it = it->next)
+        {
+          if (fstatat (it->fd, ret->path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+            ret->ino = st.st_ino;
         }
     }
 
@@ -582,326 +600,132 @@ insert_node (struct lo_node *parent, struct lo_node *item, bool replace)
 
   item->parent = parent;
 
-  if (parent->lowerdir && item->lowerdir == NULL)
-    item->lowerdir = hash_lookup (parent->lowerdir->children, item);
-
   return item;
 }
 
-static struct lo_node *
-traverse_dir (char * const dir, struct lo_node *lower, bool low)
+static const char *
+get_whiteout_name (const char *name, struct stat *st)
 {
-  struct lo_node *root, *n, *parent;
-  int ret = -1;
-  char *const dirs[] = {dir, NULL};
-  const char *name;
-  char tmp[PATH_MAX + 4];
-  FTS *fts = fts_open (dirs, FTS_COMFOLLOW, NULL);
-  if (fts == NULL)
-    return NULL;
-
-  root = NULL;
-
-  while (1)
-    {
-      FTSENT *ent = fts_read (fts);
-      if (ent == NULL)
-        {
-          if (errno)
-            goto err;
-          break;
-        }
-
-      switch (ent->fts_info)
-        {
-        case FTS_D:
-          if (root == NULL)
-            {
-              root = make_lo_node (dir, "/", ent->fts_statp->st_ino, true);
-              root->lowerdir = lower;
-              root->low = low ? 1 : 0;
-              ent->fts_pointer = root;
-            }
-          else
-            {
-              n = make_lo_node (ent->fts_path, ent->fts_name, ent->fts_statp->st_ino, true);
-              ent->fts_pointer = n;
-              if (n == NULL)
-                goto err;
-              parent = (struct lo_node *) ent->fts_parent->fts_pointer;
-              n = insert_node (parent, n, false);
-              if (n == NULL)
-                goto err;
-              n->low = low ? 1 : 0;
-            }
-          break;
-
-        case FTS_DP:
-          break;
-
-        case FTS_F:
-        case FTS_SL:
-        case FTS_SLNONE:
-        case FTS_DEFAULT:
-          name = ent->fts_name;
-          if ((ent->fts_statp->st_mode & S_IFMT) == S_IFCHR)
-            {
-              if (major (ent->fts_statp->st_rdev) == 0
-                  && minor (ent->fts_statp->st_rdev) == 0)
-                {
-                  sprintf (tmp, ".wh.%s", ent->fts_name);
-                  name = tmp;
-                }
-            }
-
-          n = make_lo_node (ent->fts_path, name, ent->fts_statp->st_ino, false);
-          if (n == NULL)
-            goto err;
-          n->low = low ? 1 : 0;
-          parent = (struct lo_node *) ent->fts_parent->fts_pointer;
-          n = insert_node (parent, n, true);
-          if (n == NULL)
-            goto err;
-          break;
-        }
-    }
-
-  ret = 0;
-
- err:
-  if (ret)
-    {
-      node_mark_all_free (root);
-      node_free (root);
-      root = NULL;
-    }
-  fts_close (fts);
-  return root;
-}
-
-static bool
-has_prefix (const char *str, const char *pref)
-{
-  while (1)
-    {
-      if (*pref == '\0')
-        return true;
-      if (*str == '\0')
-        return false;
-      if (*pref != *str)
-        return false;
-      str++;
-      pref++;
-    }
-  return false;
-}
-
-static struct lo_node *
-merge_trees (struct lo_node *origin, struct lo_node *new)
-{
-  struct lo_node *it;
-  struct lo_node **children;
-  size_t i, s;
-
-  if (!node_dirp (origin) || !node_dirp (new))
-    {
-      new = insert_node (origin->parent, new, true);
-      if (new == NULL)
-        return NULL;
-      return origin;
-    }
-
-  s = sizeof (*children) * hash_get_n_entries (new->children);
-  children = malloc (s);
-  if (children == NULL)
-    return NULL;
-
-  s = hash_get_entries (new->children, (void **) children, s);
-  for (i = s; i > 0; i--)
-    {
-      struct lo_node *prev;
-
-      it = children[i - 1];
-      prev = hash_lookup (origin->children, it);
-
-      if (has_prefix (it->name, ".wh."))
-        {
-          struct lo_node *rm;
-          char *name = it->name;
-
-          it->name = it->name + 4;
-          rm = hash_delete (origin->children, it);
-          it->name = name;
-          if (rm)
-            node_free (rm);
-          continue;
-        }
-
-      if (prev != NULL && node_dirp (origin) && node_dirp (it))
-        {
-          hash_delete (new->children, it);
-          if (merge_trees (prev, it) == NULL)
-            {
-              free (children);
-              return NULL;
-            }
-        }
-      else
-        {
-          hash_delete (new->children, it);
-          it = insert_node (origin, it, true);
-          if (it == NULL)
-            {
-              free (children);
-              return NULL;
-            }
-        }
-    }
-
-  node_free (new);
-
-  free (children);
-  return origin;
-}
-
-static struct lo_node *
-reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
-{
-  DIR *dp;
-  struct dirent *dent;
-  char *it;
-  int fd;
-  struct stat st;
-  struct lo_node *created = NULL;
-  Hash_table *whiteouts = NULL;
-
-  if (n)
-    {
-      n->path = path;
-      if (n->not_exists)
-        return n;
-    }
-  else
-    {
-      n = created = make_lo_node (path, name, 0, true);
-      if (n == NULL)
-        return NULL;
-    }
-
-  n->lowerdir = lowerdir;
-  dp = opendir (path);
-  if (dp == NULL)
-    {
-      if (created)
-        node_free (created);
-      return NULL;
-    }
-
-  whiteouts = hash_initialize (10, NULL, str_hasher, str_compare, free);
-  if (whiteouts == NULL)
-    {
-      if (created)
-        node_free (created);
-      closedir (dp);
-      errno = ENOMEM;
-      return NULL;
-    }
-
-  fd = dirfd (dp);
-  while (dp && ((dent = readdir (dp)) != NULL))
-    {
-      bool dirp;
-      struct lo_node *child;
-      char b[PATH_MAX + 1];
-      struct lo_node key;
-
-      key.name = dent->d_name;
-      if (hash_lookup (n->children, &key))
-        continue;
-
-      if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
-          continue;
-
-      if (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0)
-        goto err;
-
-      sprintf (b, "%s/%s", path, dent->d_name);
-      dirp = st.st_mode & S_IFDIR;
-
-      if (has_prefix (dent->d_name, ".wh."))
-        {
-          char *tmp, *name = strdup (dent->d_name + 4);
-          if (name == NULL)
-            {
-              errno = ENOMEM;
-              closedir (dp);
-              hash_free (whiteouts);
-              if (created)
-                node_free (created);
-              return NULL;
-            }
-          tmp = hash_insert (whiteouts, name);
-          if (tmp == NULL)
-            {
-              free (name);
-              errno = ENOMEM;
-              closedir (dp);
-              hash_free (whiteouts);
-              if (created)
-                node_free (created);
-              return NULL;
-            }
-          continue;
-        }
-      else
-        {
-          if (hash_lookup (n->children, &key))
-            continue;
-        }
-
-      child = make_lo_node (b, dent->d_name, dent->d_ino, dirp);
-      if (!child)
-        goto err;
-
-      if (lowerdir)
-        child->lowerdir = hash_lookup (lowerdir->children, &key);
-
-      if (dirp)
-        child->dirty = 1;
-
-      child = insert_node (n, child, false);
-      if (child == NULL)
-        goto err;
-    }
-  closedir (dp);
-
-  for (it = hash_get_first (whiteouts); it; it = hash_get_next (whiteouts, it))
-    {
-      struct lo_node key, *tmp;
-
-      key.name = it;
-      tmp = (struct lo_node *) hash_delete (n->children, &key);
-      if (tmp)
-        node_free (tmp);
-    }
-  hash_free (whiteouts);
-  whiteouts = NULL;
-
-  n->dirty = 0;
-  return n;
-
- err:
-  if (created)
-    node_free (created);
-  closedir (dp);
+  if (has_prefix (name, ".wh."))
+    return name + 4;
+  if ((st->st_mode & S_IFMT) == S_IFCHR
+      && major (st->st_rdev) == 0
+      && minor (st->st_rdev) == 0)
+    return name;
   return NULL;
 }
 
 static struct lo_node *
-read_dirs (char *path, struct lo_node *lower, bool low)
+load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *path, char *name)
+{
+  DIR *dp;
+  struct dirent *dent;
+  struct stat st;
+  struct lo_layer *it;
+
+  if (!n)
+    {
+      n = make_lo_node (path, layer, name, 0, true);
+      if (n == NULL)
+        return NULL;
+    }
+
+  for (it = lo->layers; it; it = it->next)
+    {
+      int fd = openat (it->fd, path, O_DIRECTORY);
+      if (fd < 0)
+        continue;
+
+      dp = fdopendir (fd);
+      if (dp == NULL)
+        {
+          close (fd);
+          continue;
+        }
+
+      while (((dent = readdir (dp)) != NULL))
+        {
+          struct lo_node key;
+          const char *wh;
+          char path[PATH_MAX + 1];
+          struct lo_node *child = NULL;
+
+          key.name = dent->d_name;
+
+          if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
+            continue;
+
+          if (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0)
+            {
+              closedir (dp);
+              return NULL;
+            }
+
+          child = hash_lookup (n->children, &key);
+          if (child)
+            {
+              /* Update the ino with the lowest one found.  Ignore if the file
+                 was deleted by intermediate layers, we only need to keep the same
+                 inode after a copyup.  */
+              child->ino = st.st_ino;
+              child->present_lowerdir = 1;
+              continue;
+            }
+
+          wh = get_whiteout_name (dent->d_name, &st);
+          if (wh)
+            {
+              child = make_whiteout_node (wh);
+              if (child == NULL)
+                {
+                  errno = ENOMEM;
+                  closedir (dp);
+                  return NULL;
+                }
+            }
+          else
+            {
+              bool dirp = st.st_mode & S_IFDIR;
+
+              sprintf (path, "%s/%s", n->path, dent->d_name);
+              child = make_lo_node (path, it, dent->d_name, st.st_ino, dirp);
+
+              if (child == NULL)
+                {
+                  errno = ENOMEM;
+                  closedir (dp);
+                  return NULL;
+                }
+            }
+
+            if (insert_node (n, child, false) == NULL)
+            {
+              errno = ENOMEM;
+              return NULL;
+            }
+        }
+      closedir (dp);
+    }
+
+  return n;
+}
+
+static void
+free_layers (struct lo_layer *layers)
+{
+  if (layers == NULL)
+    return;
+  free_layers (layers->next);
+  free (layers->path);
+  if (layers->fd >= 0)
+    close (layers->fd);
+  free (layers);
+}
+
+static struct lo_layer *
+read_dirs (char *path, bool low, struct lo_layer *layers)
 {
   char *buf = NULL, *saveptr = NULL, *it;
-  struct lo_node *root = NULL;
 
   if (path == NULL)
     return NULL;
@@ -913,115 +737,70 @@ read_dirs (char *path, struct lo_node *lower, bool low)
   for (it = strtok_r (path, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
       char full_path[PATH_MAX + 1];
-      struct lo_node *node;
+      struct lo_layer *l = NULL;
 
       if (realpath (it, full_path) < 0)
         return NULL;
 
-      node = traverse_dir (full_path, lower, low);
-      if (node == NULL)
+      l = malloc (sizeof (*l));
+      if (l == NULL)
         {
-          free (buf);
+          free_layers (layers);
           return NULL;
         }
 
-      if (root == NULL)
-        root = node;
-      else
+      l->path = strdup (full_path);
+      if (l->path == NULL)
         {
-          node = merge_trees (root, node);
-          if (node == NULL)
-            {
-              free (buf);
-              node_free (root);
-              return NULL;
-            }
-          root = node;
+          free (l);
+          free_layers (layers);
+          return NULL;
         }
+
+      l->fd = open (l->path, O_DIRECTORY);
+      if (l->fd < 0)
+        {
+          free (l->path);
+          free (l);
+          free_layers (layers);
+          return NULL;
+        }
+
+      l->low = low;
+      l->next = layers;
+      layers = l;
     }
   free (buf);
-  return root;
+  return layers;
 }
 
 static struct lo_node *
-do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *path)
+do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
 {
-  char *saveptr = NULL, *it;
-  char *b;
+  struct lo_node key;
   struct lo_node *node;
-  struct lo_node *lowerdir;
 
   if (parent == FUSE_ROOT_ID)
     node = lo->root_upper;
   else
     node = (struct lo_node *) parent;
 
-  if (path == NULL)
-    return node;
-
-  lowerdir = node->lowerdir;
-  if (*path == '\0')
-    return node;
-
-  b = alloca (strlen (path) + 1);
-  strcpy (b, path);
-
-  for (it = strtok_r (b, "/", &saveptr); it; it = strtok_r (NULL, "/", &saveptr))
+  if (node_dirp (node) && node->dirty)
     {
-      struct lo_node *next;
-      struct lo_node tmp;
+      node = load_dir (lo, node, node->layer, node->path, node->name);
+      if (node == NULL)
+          return NULL;
 
-      if (node->dirty)
-        {
-          node = reload_dir (node, node->path, node->name, node->lowerdir);
-          if (node == NULL)
-            return node;
-        }
-
-      tmp.name = it;
-
-      if (lowerdir && lowerdir->children)
-        lowerdir = hash_lookup (lowerdir->children, &tmp);
-      else
-        lowerdir = NULL;
-
-      if (node->children == NULL && lowerdir == NULL)
-        return NULL;
-
-      next = hash_lookup (node->children, &tmp);
-      if (next != NULL)
-          node = next;
-      else
-        {
-          char b[PATH_MAX + 1];
-
-          if (lowerdir == NULL)
-            return NULL;
-
-          sprintf (b, "%s/.wh.%s", node->path, lowerdir->name);
-          if (file_exists_p (b))
-            return NULL;
-
-          sprintf (b, "%s/%s", node->path, lowerdir->name);
-          next = make_lo_node (b, lowerdir->name, 0, lowerdir->children != NULL);
-          if (!next)
-            return NULL;
-
-          next->not_exists = 1;
-
-          next = insert_node (node, next, false);
-          if (next == NULL)
-            return NULL;
-        }
-
-      node = next;
-
-      if (lowerdir)
-        assert (strcmp (node->name, lowerdir->name) == 0);
-
-      node->lowerdir = lowerdir;
+      node->dirty = 0;
     }
 
+  if (name == NULL)
+    return node;
+
+  key.name = (char *) name;
+  node = hash_lookup (node->children, &key);
+  if (node == NULL || node->whiteout)
+    return NULL;
   return node;
 }
 
@@ -1046,16 +825,6 @@ lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
-  if (node->dirty && !node->not_exists)
-    {
-      node = reload_dir (node, get_node_path (node), node->name, node->lowerdir);
-      if (node == NULL)
-        {
-          fuse_reply_err (req, ENOENT);
-          return;
-        }
-    }
-
   err = rpl_stat (req, node, &e.attr);
   if (err)
     {
@@ -1063,7 +832,7 @@ lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
-  e.ino = (fuse_ino_t) node;
+  e.ino = NODE_TO_INODE (node);
   node->lookups++;
   e.attr_timeout = ATTR_TIMEOUT;
   e.entry_timeout = ENTRY_TIMEOUT;
@@ -1073,9 +842,7 @@ lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
 struct lo_dirp
 {
   struct lo_data *lo;
-  fuse_ino_t parent;
-  Hash_table *elements;
-  char **tbl;
+  struct lo_node **tbl;
   size_t tbl_size;
   size_t offset;
 };
@@ -1089,15 +856,17 @@ lo_dirp (struct fuse_file_info *fi)
 static void
 lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-  int error;
-  DIR *dp = NULL;
-  char *it;
+  size_t counter = 0;
   struct lo_node *node;
-  struct lo_node *low = NULL;
   struct lo_data *lo = lo_data (req);
+  struct lo_node *it;
   struct lo_dirp *d = calloc (1, sizeof (struct lo_dirp));
-  struct dirent *dent;
-  Hash_table *whiteouts = NULL;
+
+  if (d == NULL)
+    {
+      errno = ENOENT;
+      goto out_errno;
+    }
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1106,156 +875,29 @@ lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       goto out_errno;
     }
 
-  if (node->dirty)
+  if (! node_dirp (node))
     {
-      node = reload_dir (node, node->path, node->name, node->lowerdir);
-      if (node == NULL)
-        goto out_errno;
-    }
-
-  d->parent = ino;
-  d->offset = 0;
-  d->elements = hash_initialize (10, NULL, str_hasher, str_compare, free);
-  if (d->elements == NULL)
-    {
-      errno = ENOMEM;
+      errno = ENOTDIR;
       goto out_errno;
     }
 
-  if (node->lowerdir && node->lowerdir->children)
-    low = node->lowerdir;
-  else if (node->low && node->children)
-    low = node;
-
-  if (low)
-    {
-      struct lo_node *it;
-
-      for (it = hash_get_first (low->children); it; it = hash_get_next (low->children, it))
-        {
-          char *i;
-          char *el;
-          struct lo_node *n;
-
-          n = do_lookup_file (lo, ino, it->name);
-          if (n == NULL)
-            continue;
-
-          el = strdup (it->name);
-          if (el == NULL)
-              {
-                errno = ENOMEM;
-                goto out_errno;
-              }
-
-          i = hash_insert (d->elements, el);
-          if (i == NULL)
-            {
-              free (el);
-              errno = ENOMEM;
-              goto out_errno;
-            }
-          if (i != el)
-            free (el);
-        }
-    }
-
-  if (!node->low)
-    {
-      dp = opendir (node->path);
-      if (dp == NULL && errno != ENOENT)
-        goto out_errno;
-      whiteouts = hash_initialize (10, NULL, str_hasher, str_compare, free);
-      if (whiteouts == NULL)
-        {
-          errno = ENOMEM;
-          goto out_errno;
-        }
-
-      while (dp && ((dent = readdir (dp)) != NULL))
-        {
-          char *el = NULL;
-          char *prev;
-          struct lo_node *l;
-
-          if (strcmp (dent->d_name, ".") == 0)
-            l = node;
-          else if (strcmp (dent->d_name, "..") == 0)
-            {
-              if (node->parent)
-                l = node->parent;
-              else
-                continue;
-            }
-          else
-            {
-              l = do_lookup_file (lo, NODE_TO_INODE (node), dent->d_name);
-            }
-
-          if (has_prefix (dent->d_name, ".wh."))
-            {
-              char *tmp, *name = strdup (dent->d_name + 4);
-              if (name == NULL)
-                {
-                  errno = ENOMEM;
-                  goto out_errno;
-                }
-              tmp = hash_insert (whiteouts, name);
-              if (tmp == NULL)
-                {
-                  free (name);
-                  errno = ENOMEM;
-                  goto out_errno;
-                }
-              if (tmp != name)
-                free (name);
-              continue;
-            }
-
-          if (l == NULL)
-            continue;
-
-          el = strdup (dent->d_name);
-          if (el == NULL)
-            {
-              errno = ENOMEM;
-              goto out_errno;
-            }
-
-          prev = hash_insert (d->elements, el);
-          if (prev == NULL)
-            {
-              errno = ENOMEM;
-              goto out_errno;
-            }
-          if (prev != el)
-            free (el);
-        }
-      if (dp)
-        {
-          closedir (dp);
-          dp = NULL;
-        }
-
-      for (it = hash_get_first (whiteouts); it; it = hash_get_next (whiteouts, it))
-        {
-          char *tmp = hash_delete (d->elements, it);
-          if (tmp)
-            free (tmp);
-        }
-      hash_free (whiteouts);
-      whiteouts = NULL;
-    }
-
-  d->tbl_size = hash_get_n_entries (d->elements);
-  d->tbl = malloc (sizeof (char *) * d->tbl_size);
+  d->offset = 0;
+  d->tbl_size = hash_get_n_entries (node->children) + 2;
+  d->tbl = malloc (sizeof (struct lo_node *) * d->tbl_size);
   if (d->tbl == NULL)
     {
       errno = ENOMEM;
       goto out_errno;
     }
 
-  hash_get_entries (d->elements, (void **) d->tbl, d->tbl_size);
+  d->tbl[counter++] = node;
+  d->tbl[counter++] = node->parent;
+
+  for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+    {
+      it->lookups++;
+      d->tbl[counter++] = it;
+    }
 
   fi->fh = (uintptr_t) d;
 
@@ -1263,20 +905,13 @@ lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   return;
 
 out_errno:
-  error = errno;
-  if (whiteouts)
-    hash_free (whiteouts);
-  if (dp)
-    closedir (dp);
   if (d)
     {
-      if (d->elements)
-        hash_free (d->elements);
       if (d->tbl)
         free (d->tbl);
       free (d);
     }
-  fuse_reply_err (req, error);
+  fuse_reply_err (req, errno);
 }
 
 static void
@@ -1286,7 +921,6 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
   struct lo_dirp *d = lo_dirp (fi);
   size_t remaining = size;
   char *p, *buffer = calloc (size, 1);
-  struct lo_data *lo = lo_data (req);
 
   if (buffer == NULL)
     {
@@ -1299,27 +933,11 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         int ret;
         size_t entsize;
         struct stat st;
-        char *name = d->tbl[offset];
-        struct lo_node *node;
+        const char *name;
+        struct lo_node *node = d->tbl[offset];
 
-        if (strcmp (name, ".") == 0)
-          {
-            node = do_lookup_file (lo, ino, NULL);
-          }
-        else if (strcmp (name, "..") == 0)
-          {
-            node = do_lookup_file (lo, ino, NULL);
-            if (node->parent)
-              node = node->parent;
-            else
-              continue;
-          }
-        else
-          {
-            node = do_lookup_file (lo, ino, name);
-            if (node == NULL)
-              continue;
-          }
+        if (node == NULL || node->whiteout)
+          continue;
 
         ret = rpl_stat (req, node, &st);
         if (ret < 0)
@@ -1327,6 +945,13 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             fuse_reply_err (req, errno);
             goto exit;
           }
+
+        if (offset == 0)
+          name = ".";
+        else if (offset == 1)
+          name = "..";
+        else
+          name = node->name;
 
         if (!plus)
           entsize = fuse_add_direntry (req, p, remaining, name, &st, offset + 1);
@@ -1344,7 +969,8 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 
             if (entsize <= remaining)
               {
-                if ((strcmp (name, ".") != 0) && (strcmp (name, "..") != 0))
+                /* First two entries are . and .. */
+                if (offset >= 2)
                   node->lookups++;
               }
           }
@@ -1377,9 +1003,15 @@ lo_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
 static void
 lo_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
+  size_t s;
   struct lo_dirp *d = lo_dirp (fi);
-  if (d->elements)
-    hash_free (d->elements);
+
+  for (s = 2; s < d->tbl_size; s++)
+    {
+      struct lo_node *n = d->tbl[s];
+      do_forget (NODE_TO_INODE (n), 1);
+    }
+
   free (d->tbl);
   free (d);
   fuse_reply_err (req, 0);
@@ -1392,6 +1024,7 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   struct lo_node *node;
   struct lo_data *lo = lo_data (req);
   char buf[1024];
+  int fd;
 
   if (lo_debug (req))
     fprintf (stderr, "lo_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
@@ -1403,7 +1036,14 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
-  len = llistxattr (get_node_path (node), buf, sizeof (buf));
+  fd = openat (node_dirfd (node), node->path, O_RDONLY);
+  if (fd < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  len = flistxattr (fd, buf, sizeof (buf));
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
@@ -1411,6 +1051,7 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   else if (len <= size)
     fuse_reply_buf (req, buf, len);
 
+  close (fd);
 }
 
 static void
@@ -1420,6 +1061,7 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   struct lo_node *node;
   struct lo_data *lo = lo_data (req);
   char buf[1024];
+  int fd;
 
   if (lo_debug (req))
     fprintf (stderr, "lo_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
@@ -1431,13 +1073,22 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
-  len = lgetxattr (get_node_path (node), name, buf, sizeof (buf));
+  fd = openat (node_dirfd (node), node->path, O_RDONLY);
+  if (fd < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  len = fgetxattr (fd, name, buf, sizeof (buf));
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
     fuse_reply_xattr (req, len);
   else if (len <= size)
     fuse_reply_buf (req, buf, len);
+
+  close (fd);
 }
 
 static void
@@ -1451,7 +1102,7 @@ lo_access (fuse_req_t req, fuse_ino_t ino, int mask)
     fprintf (stderr, "lo_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
-  ret = access (get_node_path (n), mask);
+  ret = faccessat (node_dirfd (n), n->path, mask, AT_SYMLINK_NOFOLLOW);
   fuse_reply_err (req, ret < 0 ? errno : 0);
 }
 
@@ -1460,21 +1111,18 @@ create_directory (struct lo_data *lo, struct lo_node *src)
 {
   int ret;
   struct stat st;
-  char *dest_path;
 
   if (src == NULL)
     return 0;
 
-  if (! src->not_exists)
+  if (src->layer == get_upper_layer (lo))
     return 0;
 
-  dest_path = src->path;
-
-  ret = lstat (src->lowerdir->path, &st);
+  ret = fstatat (node_dirfd (src), src->path, &st, AT_SYMLINK_NOFOLLOW);
   if (ret < 0)
     goto out;
 
-  ret = mkdir (dest_path, st.st_mode);
+  ret = mkdirat (get_upper_layer (lo)->fd, src->path, st.st_mode);
   if (ret < 0 && errno == EEXIST)
     {
       ret = 0;
@@ -1486,23 +1134,23 @@ create_directory (struct lo_data *lo, struct lo_node *src)
       if (ret != 0)
         goto out;
 
-      ret = mkdir (dest_path, st.st_mode);
+      ret = mkdirat (lo->layers[0].fd, src->path, st.st_mode);
       if (ret < 0)
         goto out;
 
-      ret = chown (dest_path, st.st_uid, st.st_gid);
+      ret = fchownat (lo->layers[0].fd, src->path, st.st_uid, st.st_gid, AT_SYMLINK_NOFOLLOW);
     }
 
 out:
   if (ret == 0)
     {
-      src->not_exists = 0;
+      src->layer = get_upper_layer (lo);
 
       if (src->parent)
         {
           char wh[PATH_MAX];
-          sprintf (wh, "%s/.wh.%s", src->parent->path, src->name);
-          unlink (wh);
+          sprintf (wh, "%s/.wh.%s", src->path, src->name);
+          unlinkat (node_dirfd (src), wh, 0);
         }
     }
 
@@ -1517,8 +1165,8 @@ copyup (struct lo_data *lo, struct lo_node *node)
   int dfd = -1, sfd = -1;
   struct stat st;
   int r;
-  const char *src = node->lowerdir->path;
-  const char *dst = node->path;
+  const size_t buf_size = 1 << 20;
+  char *buf = NULL;
   struct timespec times[2];
 
   if (node->parent)
@@ -1528,14 +1176,14 @@ copyup (struct lo_data *lo, struct lo_node *node)
         return r;
     }
 
-  if (lstat (src, &st) < 0)
+  if (fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW) < 0)
     goto exit;
 
   if (node->parent)
     {
       char whpath[PATH_MAX + 10];
       sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
-      if (unlink (whpath) < 0 && errno != ENOENT)
+      if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
         goto exit;
     }
 
@@ -1550,21 +1198,21 @@ copyup (struct lo_data *lo, struct lo_node *node)
   if ((st.st_mode & S_IFMT) == S_IFLNK)
     {
       char p[PATH_MAX + 1];
-      ret = readlink (src, p, sizeof (p) - 1);
+      ret = readlinkat (node_dirfd (node), node->path, p, sizeof (p) - 1);
       if (ret < 0)
         goto exit;
       p[ret] = '\0';
-      ret = symlink (p, dst);
+      ret = symlinkat (p, get_upper_layer (lo)->fd, node->path);
       if (ret < 0)
         goto exit;
       goto success;
     }
 
-  sfd = open (src, O_RDONLY);
+  sfd = openat (node_dirfd (node), node->path, O_RDONLY);
   if (sfd < 0)
     goto exit;
 
-  dfd = open (dst, O_WRONLY|O_CREAT, st.st_mode);
+  dfd = openat (get_upper_layer (lo)->fd, node->path, O_CREAT|O_WRONLY, st.st_mode);
   if (dfd < 0)
     goto exit;
 
@@ -1572,13 +1220,15 @@ copyup (struct lo_data *lo, struct lo_node *node)
   if (ret < 0)
       goto exit;
 
+  buf = malloc (buf_size);
+  if (buf == NULL)
+    goto exit;
   for (;;)
     {
       int written;
       int nread;
-      char buf[4096];
 
-      nread = TEMP_FAILURE_RETRY (read (sfd, buf, sizeof (buf)));
+      nread = TEMP_FAILURE_RETRY (read (sfd, buf, buf_size));
       if (nread < 0)
         goto exit;
 
@@ -1605,10 +1255,11 @@ copyup (struct lo_data *lo, struct lo_node *node)
  success:
   ret = 0;
 
-  node->not_exists = 0;
+  node->layer = get_upper_layer (lo);
 
  exit:
   saved_errno = errno;
+  free (buf);
   if (sfd >= 0)
     close (sfd);
   if (dfd >= 0)
@@ -1623,14 +1274,14 @@ get_node_up (struct lo_data *lo, struct lo_node *node)
 {
   int ret;
 
-  if (!node->lowerdir || !node->not_exists)
+  if (node->layer == get_upper_layer (lo))
     return node;
 
   ret = copyup (lo, node);
   if (ret < 0)
     return NULL;
 
-  assert (has_prefix (node->path, lo->upperdir));
+  assert (node->layer == get_upper_layer (lo));
 
   return node;
 }
@@ -1643,6 +1294,8 @@ count_dir_entries (struct lo_node *node)
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
+      if (it->whiteout)
+        continue;
       if (strcmp (it->name, ".") == 0)
         continue;
       if (strcmp (it->name, "..") == 0)
@@ -1700,51 +1353,45 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
-  if (! node->low)
+  if (node->layer == get_upper_layer (lo))
     {
+      node->rmfrom = node->layer->fd;
+
       if (! dirp)
         node->do_unlink = 1;
       else
         {
           DIR *dp;
           size_t c = 0;
-
-          if (node->dirty)
-            {
-              node = reload_dir (node, node->path, node->name, node->lowerdir);
-              if (node == NULL)
-                {
-                  fuse_reply_err (req, errno);
-                  return;
-                }
-            }
+          int fd = openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY);
 
           if (node->children)
             c = count_dir_entries (node);
-          if (c == 0 && node->lowerdir && node->lowerdir->children)
-            c = count_dir_entries (node->lowerdir);
           if (c)
             {
               fuse_reply_err (req, ENOTEMPTY);
               return;
             }
 
-          dp = opendir (node->path);
-          if (dp)
+          if (fd >= 0)
             {
-              struct dirent *dent;
-
-              while (dp && ((dent = readdir (dp)) != NULL))
+              dp = fdopendir (fd);
+              if (dp)
                 {
-                  if (strcmp (dent->d_name, ".") == 0)
-                    continue;
-                  if (strcmp (dent->d_name, "..") == 0)
-                    continue;
-                  if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
-                    unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
-                }
+                  struct dirent *dent;
 
-              closedir (dp);
+                  while (dp && ((dent = readdir (dp)) != NULL))
+                    {
+                      if (strcmp (dent->d_name, ".") == 0)
+                        continue;
+                      if (strcmp (dent->d_name, "..") == 0)
+                        continue;
+                      if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
+                        unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+                    }
+
+                  closedir (dp);
+                }
             }
 
           node->do_rmdir = 1;
@@ -1765,9 +1412,9 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
-  sprintf (whiteout_path, "%s/.wh.%s", get_node_path (pnode), name);
-  fd = creat (whiteout_path, 0700);
-  if (fd < 0)
+  sprintf (whiteout_path, "%s/.wh.%s", pnode->path, name);
+  fd = openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700);
+  if (fd < 0 && errno != EEXIST)
     {
       fuse_reply_err (req, errno);
       return;
@@ -1878,12 +1525,13 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
   struct lo_node *n;
   bool readonly = (flags & (O_APPEND | O_RDWR | O_WRONLY | O_CREAT | O_TRUNC)) == 0;
   char path[PATH_MAX + 10];
-  int fd, ret;
+  int fd;
 
   flags |= O_NOFOLLOW;
 
   if (name && has_prefix (name, ".wh."))
     {
+
       errno = EINVAL;
       return - 1;
     }
@@ -1918,25 +1566,23 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
 
       p = get_node_up (lo, p);
       if (p == NULL)
-        {
-          return -1;
-        }
+        return -1;
 
       sprintf (path, "%s/.wh.%s", p->path, name);
-      unlink (path);
+      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
+        return -1;
 
       sprintf (path, "%s/%s", p->path, name);
-      unlink (path);
-      fd = open (path, flags, mode);
-      if (fd < 0)
-        {
-          return -1;
-        }
+      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
+        return -1;
 
-      n = make_lo_node (path, name, 0, false);
+      fd = openat (get_upper_layer (lo)->fd, path, flags, mode);
+      if (fd < 0)
+        return -1;
+
+      n = make_lo_node (path, get_upper_layer (lo), name, 0, false);
       if (n == NULL)
         {
-          p->dirty = 1;
           errno = ENOMEM;
           close (fd);
           return -1;
@@ -1944,7 +1590,6 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
       n = insert_node (p, n, true);
       if (n == NULL)
         {
-          p->dirty = 1;
           errno = ENOMEM;
           close (fd);
           return -1;
@@ -1955,11 +1600,7 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
   /* readonly, we can use both lowerdir and upperdir.  */
   if (readonly)
     {
-      ret = open (get_node_path (n), flags, mode);
-      if (ret < 0)
-        return ret;
-
-      return ret;
+      return openat (node_dirfd (n), n->path, flags, mode);
     }
   else
     {
@@ -1967,11 +1608,7 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
       if (n == NULL)
         return -1;
 
-      fd = open (n->path, flags, mode);
-      if (fd < 0)
-        return fd;
-
-      return fd;
+      return openat (node_dirfd (n), n->path, flags, mode);
     }
 }
 
@@ -2128,6 +1765,7 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
   struct timespec times[2];
   uid_t uid;
   gid_t gid;
+  int dirfd;
 
   if (lo_debug (req))
     fprintf (stderr, "lo_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
@@ -2146,7 +1784,9 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
       return;
     }
 
-  if (lstat (node->path, &old_st) < 0)
+  dirfd = node_dirfd (node);
+
+  if (fstatat (dirfd, node->path, &old_st, AT_SYMLINK_NOFOLLOW) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -2172,22 +1812,34 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
 
   if (times[0].tv_sec != UTIME_OMIT || times[1].tv_sec != UTIME_OMIT)
     {
-      if ((utimensat (AT_FDCWD, node->path, times, AT_SYMLINK_NOFOLLOW) < 0))
+      if ((utimensat (dirfd, node->path, times, AT_SYMLINK_NOFOLLOW) < 0))
         {
           fuse_reply_err (req, errno);
           return;
         }
     }
 
-  if ((to_set & FUSE_SET_ATTR_MODE) && chmod (node->path, attr->st_mode) < 0)
+  if ((to_set & FUSE_SET_ATTR_MODE) && fchmodat (dirfd, node->path, attr->st_mode, 0) < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
-  if ((to_set & FUSE_SET_ATTR_SIZE) && truncate (node->path, attr->st_size) < 0)
+  if ((to_set & FUSE_SET_ATTR_SIZE))
     {
-      fuse_reply_err (req, errno);
-      return;
+      int fd = openat (dirfd, node->path, O_WRONLY);
+      if (fd < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+
+      if (ftruncate (fd, attr->st_size) < 0)
+        {
+          close (fd);
+          fuse_reply_err (req, errno);
+          return;
+        }
+      close (fd);
     }
 
   uid = old_st.st_uid;
@@ -2199,7 +1851,7 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
 
   if (uid != old_st.st_uid || gid != old_st.st_gid)
     {
-      if (lchown (node->path, uid, gid) < 0)
+      if (fchownat (dirfd, node->path, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
         {
           fuse_reply_err (req, errno);
           return;
@@ -2270,20 +1922,20 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
     }
 
   sprintf (path, "%s/.wh.%s", newparentnode->path, newname);
-  if (unlink (path) < 0 && errno != ENOENT)
+  if (unlinkat (node_dirfd (newparentnode), path, 0) < 0 && errno != ENOENT)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
   sprintf (path, "%s/%s", newparentnode->path, newname);
-  if (link (get_node_path (node), path) < 0)
+  if (linkat (node_dirfd (newparentnode), node->path, node_dirfd (newparentnode), path, 0) < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  node = make_lo_node (path, newname, 0, false);
+  node = make_lo_node (path, get_upper_layer (lo), newname, node->ino, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2306,7 +1958,7 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
       return;
     }
 
-  e.ino = (fuse_ino_t) node;
+  e.ino = NODE_TO_INODE (node);
   node->lookups++;
   e.attr_timeout = ATTR_TIMEOUT;
   e.entry_timeout = ENTRY_TIMEOUT;
@@ -2347,21 +1999,21 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
     }
 
   sprintf (path, "%s/.wh.%s", pnode->path, name);
-  if (unlink (path) < 0 && errno != ENOENT)
+  if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
   sprintf (path, "%s/%s", pnode->path, name);
-  ret = symlink (link, path);
+  ret = symlinkat (link, get_upper_layer (lo)->fd, path);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  node = make_lo_node (path, name, 0, false);
+  node = make_lo_node (path, get_upper_layer (lo), name, 0, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2384,7 +2036,7 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
       return;
     }
 
-  e.ino = (fuse_ino_t) node;
+  e.ino = NODE_TO_INODE (node);
   node->lookups++;
   e.attr_timeout = ATTR_TIMEOUT;
   e.entry_timeout = ENTRY_TIMEOUT;
@@ -2405,38 +2057,6 @@ lo_flock (fuse_req_t req, fuse_ino_t ino,
   ret = flock (fd, op);
 
   fuse_reply_err (req, ret == 0 ? 0 : errno);
-}
-
-static struct lo_node *
-get_node_up_rec (struct lo_data *lo, struct lo_node *node)
-{
-  struct lo_node *it;
-  struct lo_node *l;
-
-  if (node->children)
-    {
-      for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
-        {
-          l = get_node_up_rec (lo, it);
-          if (l == NULL)
-            return NULL;
-        }
-    }
-  if (node->lowerdir && node->lowerdir->children)
-    {
-      for (it = hash_get_first (node->lowerdir->children); it; it = hash_get_next (node->lowerdir->children, it))
-        {
-          l = do_lookup_file (lo, NODE_TO_INODE (node), it->name);
-          if (l)
-            {
-              l = get_node_up_rec (lo, l);
-              if (l == NULL)
-                return NULL;
-            }
-        }
-    }
-
-  return get_node_up (lo, node);
 }
 
 static void
@@ -2463,7 +2083,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       return;
     }
 
-  if (node_dirp (node) && node->lowerdir)
+  if (node_dirp (node) && node->present_lowerdir)
     {
       fuse_reply_err (req, EXDEV);
       return;
@@ -2478,7 +2098,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (pnode == NULL)
     goto error;
 
-  ret = open (pnode->path, O_DIRECTORY);
+  ret = openat (node_dirfd (pnode), pnode->path, O_DIRECTORY);
   if (ret < 0)
     goto error;
   srcfd = ret;
@@ -2487,14 +2107,14 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (destpnode == NULL)
     goto error;
 
-  ret = open (destpnode->path, O_DIRECTORY);
+  ret = openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY);
   if (ret < 0)
     goto error;
   destfd = ret;
 
   destnode = do_lookup_file (lo, newparent, newname);
 
-  node = get_node_up_rec (lo, node);
+  node = get_node_up (lo, node);
   if (node == NULL)
     goto error;
 
@@ -2505,7 +2125,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
           errno = ENOENT;
           goto error;
         }
-      destnode = get_node_up_rec (lo, destnode);
+      destnode = get_node_up (lo, destnode);
       if (destnode == NULL)
         goto error;
     }
@@ -2540,17 +2160,14 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               rm = NULL;
             }
 
-          if (rm && !rm->not_exists && hide_node (lo, rm, false) < 0)
+          if (rm && hide_node (lo, rm, false) < 0)
             goto error;
         }
     }
 
   ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
   if (ret < 0)
-    {
-      pnode->dirty = destpnode->dirty = 1;
-      goto error;
-    }
+    goto error;
 
   if (flags & RENAME_EXCHANGE)
     {
@@ -2661,7 +2278,7 @@ lo_readlink (fuse_req_t req, fuse_ino_t ino)
       return;
     }
 
-  ret = readlink (get_node_path (node), buf, sizeof (buf));
+  ret = readlinkat (node_dirfd (node), node->path, buf, sizeof (buf));
   if (ret == -1)
     {
       fuse_reply_err (req, errno);
@@ -2678,21 +2295,18 @@ lo_readlink (fuse_req_t req, fuse_ino_t ino)
 }
 
 static int
-hide_all (struct lo_node *node)
+hide_all (struct lo_data *lo, struct lo_node *node)
 {
   char b[PATH_MAX];
   struct lo_node *it;
 
-  if (node->lowerdir == NULL || node->lowerdir->children == NULL)
-    return 0;
-
-  for (it = hash_get_first (node->lowerdir->children); it; it = hash_get_next (node->lowerdir->children, it))
+  for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
       int fd;
 
       sprintf (b, "%s/.wh.%s", node->path, it->name);
 
-      fd = open (b, O_CREAT, 0700);
+      fd = openat (get_upper_layer (lo)->fd, b, O_CREAT, 0700);
       if (fd < 0 && errno != EEXIST)
         return fd;
       close (fd);
@@ -2737,15 +2351,15 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     }
   sprintf (path, "%s/%s", pnode->path, name);
 
-  rmdir (path);
-  ret = mkdir (path, mode);
+  unlinkat (get_upper_layer (lo)->fd, path, AT_REMOVEDIR);
+  ret = mkdirat (get_upper_layer (lo)->fd, path, mode);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  node = make_lo_node (path, name, 0, true);
+  node = make_lo_node (path, get_upper_layer (lo), name, 0, true);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2758,7 +2372,7 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, ENOMEM);
       return;
     }
-  ret = hide_all (node);
+  ret = hide_all (lo, node);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
@@ -2766,7 +2380,7 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     }
 
   sprintf (whiteout_path, "%s/.wh.%s", pnode->path, name);
-  ret = unlink (whiteout_path);
+  ret = unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0);
   if (ret < 0 && errno != ENOENT)
     {
       fuse_reply_err (req, errno);
@@ -2782,7 +2396,7 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  e.ino = (fuse_ino_t) node;
+  e.ino = NODE_TO_INODE (node);
   e.attr_timeout = ATTR_TIMEOUT;
   e.entry_timeout = ENTRY_TIMEOUT;
   node->lookups++;
@@ -2913,15 +2527,20 @@ main (int argc, char *argv[])
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
 
-  lo.root_lower = read_dirs (lo.lowerdir, NULL, true);
-  if (lo.root_lower == NULL)
+  lo.root_lower = NULL;
+
+  lo.layers = read_dirs (lo.lowerdir, true, NULL);
+  if (lo.layers == NULL)
     error (EXIT_FAILURE, errno, "cannot read lower dirs");
 
-  lo.root_upper = reload_dir (NULL, lo.upperdir, "/", lo.root_lower);
+  lo.layers = read_dirs (lo.upperdir, false, lo.layers);
+  if (lo.layers == NULL)
+    error (EXIT_FAILURE, errno, "cannot read upper dir");
+
+  lo.root_upper = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
   if (lo.root_upper == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
   lo.root_upper->lookups = 2;
-  lo.root_upper->lowerdir = lo.root_lower;
 
   if (lo.workdir == NULL)
     error (EXIT_FAILURE, 0, "workdir not specified");
@@ -2936,6 +2555,10 @@ main (int argc, char *argv[])
       mkdir (path, 0700);
       free (lo.workdir);
       lo.workdir = strdup (path);
+
+      lo.workdir_fd = open (lo.workdir, O_DIRECTORY);
+      if (lo.workdir_fd < 0)
+        goto err_out1;
     }
 
   se = fuse_session_new (&args, &lo_oper, sizeof (lo_oper), &lo);
@@ -2955,15 +2578,16 @@ err_out2:
   fuse_session_destroy (se);
 err_out1:
 
-  node_mark_all_free (lo.root_lower);
   node_mark_all_free (lo.root_upper);
 
-  node_free (lo.root_lower);
   node_free (lo.root_upper);
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);
 
+  close (lo.workdir_fd);
+
+  free_layers (lo.layers);
   free (opts.mountpoint);
   fuse_opt_free_args (&args);
 
