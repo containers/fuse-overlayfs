@@ -104,6 +104,7 @@ struct lo_node
   char *path;
   char *name;
   int lookups;
+  ino_t ino;
   unsigned int dirty : 1;
   unsigned int low : 1;
   unsigned int do_unlink : 1;
@@ -331,6 +332,15 @@ get_gid (struct lo_data *data, gid_t id)
   return find_mapping (id, data->gid_mappings, false);
 }
 
+static ino_t
+get_inode_number (struct lo_node *node)
+{
+  if (node->lowerdir)
+    return node->lowerdir->ino;
+
+  return node->ino;
+}
+
 static int
 rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
 {
@@ -348,8 +358,7 @@ rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
   st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true);
   st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true);
 
-  st->st_ino = NODE_TO_INODE (node);
-
+  st->st_ino = get_inode_number (node);
   if (ret == 0 && node_dirp (node))
     {
       struct lo_node *it;
@@ -478,7 +487,7 @@ node_compare (const void *n1, const void *n2)
 }
 
 static struct lo_node *
-make_lo_node (const char *path, const char *name, bool dir_p)
+make_lo_node (const char *path, const char *name, ino_t ino, bool dir_p)
 {
   struct lo_node *ret = malloc (sizeof (*ret));
   if (ret == NULL)
@@ -496,6 +505,13 @@ make_lo_node (const char *path, const char *name, bool dir_p)
   ret->hidden = 0;
   ret->do_rmdir = 0;
   ret->not_exists = 0;
+  if (ino == 0)
+    {
+      struct stat st;
+      if (stat (path, &st) == 0)
+        ino = st.st_ino;
+    }
+  ret->ino = ino;
 
   ret->name = strdup (name);
   if (ret->name == NULL)
@@ -601,14 +617,14 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
         case FTS_D:
           if (root == NULL)
             {
-              root = make_lo_node (dir, "/", true);
+              root = make_lo_node (dir, "/", ent->fts_statp->st_ino, true);
               root->lowerdir = lower;
               root->low = low ? 1 : 0;
               ent->fts_pointer = root;
             }
           else
             {
-              n = make_lo_node (ent->fts_path, ent->fts_name, true);
+              n = make_lo_node (ent->fts_path, ent->fts_name, ent->fts_statp->st_ino, true);
               ent->fts_pointer = n;
               if (n == NULL)
                 goto err;
@@ -638,7 +654,7 @@ traverse_dir (char * const dir, struct lo_node *lower, bool low)
                 }
             }
 
-          n = make_lo_node (ent->fts_path, name, false);
+          n = make_lo_node (ent->fts_path, name, ent->fts_statp->st_ino, false);
           if (n == NULL)
             goto err;
           n->low = low ? 1 : 0;
@@ -767,7 +783,7 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
     }
   else
     {
-      n = created = make_lo_node (path, name, true);
+      n = created = make_lo_node (path, name, 0, true);
       if (n == NULL)
         return NULL;
     }
@@ -843,7 +859,7 @@ reload_dir (struct lo_node *n, char *path, char *name, struct lo_node *lowerdir)
             continue;
         }
 
-      child = make_lo_node (b, dent->d_name, dirp);
+      child = make_lo_node (b, dent->d_name, dent->d_ino, dirp);
       if (!child)
         goto err;
 
@@ -987,7 +1003,7 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *path)
             return NULL;
 
           sprintf (b, "%s/%s", node->path, lowerdir->name);
-          next = make_lo_node (b, lowerdir->name, lowerdir->children != NULL);
+          next = make_lo_node (b, lowerdir->name, 0, lowerdir->children != NULL);
           if (!next)
             return NULL;
 
@@ -1917,7 +1933,7 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
           return -1;
         }
 
-      n = make_lo_node (path, name, false);
+      n = make_lo_node (path, name, 0, false);
       if (n == NULL)
         {
           p->dirty = 1;
@@ -2267,7 +2283,7 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
       return;
     }
 
-  node = make_lo_node (path, newname, false);
+  node = make_lo_node (path, newname, 0, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2345,7 +2361,7 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
       return;
     }
 
-  node = make_lo_node (path, name, false);
+  node = make_lo_node (path, name, 0, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2729,7 +2745,7 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  node = make_lo_node (path, name, true);
+  node = make_lo_node (path, name, 0, true);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
