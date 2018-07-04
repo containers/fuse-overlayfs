@@ -99,7 +99,6 @@ struct lo_node
   int rmfrom;
 
   unsigned int present_lowerdir : 1;
-  unsigned int dirty : 1;
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
   unsigned int hidden : 1;
@@ -405,7 +404,6 @@ node_free (void *p)
     {
       if (hash_lookup (n->parent->children, n) == n)
         hash_delete (n->parent->children, n);
-      n->parent->dirty = 1;
       n->parent = NULL;
     }
 
@@ -516,7 +514,6 @@ make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t 
   ret->present_lowerdir = 0;
   ret->name = strdup (name);
   ret->rmfrom = 0;
-  ret->dirty = 1;
   if (ret->name == NULL)
     {
       free (ret);
@@ -778,29 +775,74 @@ static struct lo_node *
 do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
 {
   struct lo_node key;
-  struct lo_node *node;
+  struct lo_node *node, *pnode;
 
   if (parent == FUSE_ROOT_ID)
-    node = lo->root_upper;
+    pnode = lo->root_upper;
   else
-    node = (struct lo_node *) parent;
-
-  if (node_dirp (node) && node->dirty)
-    {
-      node = load_dir (lo, node, node->layer, node->path, node->name);
-      if (node == NULL)
-          return NULL;
-
-      node->dirty = 0;
-    }
+    pnode = (struct lo_node *) parent;
 
   if (name == NULL)
-    return node;
+    return pnode;
+
+  if (has_prefix (name, ".wh."))
+    {
+      errno = EINVAL;
+      return NULL;
+    }
 
   key.name = (char *) name;
-  node = hash_lookup (node->children, &key);
+  node = hash_lookup (pnode->children, &key);
+  if (node == NULL)
+    {
+      int ret;
+      char path[PATH_MAX];
+      struct lo_layer *it;
+      struct stat st;
+
+      for (it = lo->layers; it; it = it->next)
+        {
+          sprintf (path, "%s/%s", pnode->path, name);
+          ret = fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW);
+          if (ret < 0)
+            {
+              int saved_errno = errno;
+
+              if (errno == ENOENT)
+                continue;
+
+              if (node)
+                node_free (node);
+
+              errno = saved_errno;
+              return NULL;
+            }
+
+          if (node)
+            node->ino = st.st_ino;
+          else
+            {
+              node = make_lo_node (path, it, name, st.st_ino, st.st_mode & S_IFDIR);
+              if (node == NULL)
+                {
+                  errno = ENOMEM;
+                  return NULL;
+                }
+              if (insert_node (pnode, node, false) == NULL)
+                {
+                  node_free (node);
+                  errno = ENOMEM;
+                  return NULL;
+                }
+            }
+        }
+    }
+
   if (node == NULL || node->whiteout)
-    return NULL;
+    {
+      errno = ENOENT;
+      return NULL;
+    }
   return node;
 }
 
@@ -821,7 +863,7 @@ lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
     {
-      fuse_reply_err (req, ENOENT);
+      fuse_reply_err (req, errno);
       return;
     }
 
@@ -880,6 +922,10 @@ lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       errno = ENOTDIR;
       goto out_errno;
     }
+
+  node = load_dir (lo, node, node->layer, node->path, node->name);
+  if (node == NULL)
+    goto out_errno;
 
   d->offset = 0;
   d->tbl_size = hash_get_n_entries (node->children) + 2;
