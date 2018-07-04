@@ -1,0 +1,36 @@
+Summary: FUSE filesystem for containers.
+Name: containerfs
+Version: #VERSION#
+Release: 1%{?dist}
+Source0: %{url}/archive/%{name}-%{version}.tar.gz
+License: GPLv3+
+URL: https://github.com/giuseppe/containerfs
+
+# We always run autogen.sh
+BuildRequires: autoconf automake
+BuildRequires: gcc
+BuildRequires: python
+BuildRequires: git
+BuildRequires: gcc
+BuildRequires: automake
+BuildRequires: autoconf
+BuildRequires: fuse3-devel
+
+%description
+containerfs is a FUSE overlayfs implementation.
+
+%prep
+%autosetup -n %{name}-%{version}
+
+%build
+env NOCONFIGURE=1 ./autogen.sh
+%configure --disable-silent-rules
+
+%make_build
+
+%install
+%make_install INSTALL="install -p"
+
+%files
+%license COPYING
+%{_bindir}/%{name}
