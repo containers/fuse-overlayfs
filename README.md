@@ -3,10 +3,8 @@ containerfs
 
 An implementation of overlay+shiftfs in FUSE for rootless containers.
 
-Known issues:
+Limitations:
 =======================================================
-
-Hard links in some cases show different inode values.
 
 Read-only mode is not supported, so it is always required to specify
 an upperdir and a workingdir.

@@ -58,6 +58,8 @@
 #define ATTR_TIMEOUT 1000000000.0
 #define ENTRY_TIMEOUT 1000000000.0
 
+#define REDIRECT_XATTR "user.containerfs.redirect"
+
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 
 #if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 6) && !defined __cplusplus
@@ -552,11 +554,25 @@ make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t 
     {
       struct stat st;
       struct lo_layer *it;
+      char path[PATH_MAX];
 
+      strcpy (path, ret->path);
       for (it = layer; it; it = it->next)
         {
-          if (fstatat (it->fd, ret->path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+          ssize_t s;
+          int fd = openat (it->fd, path, O_RDONLY);
+          if (fd < 0)
+            continue;
+
+          if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
+
+          /* If a redirect is specified, use it for the next layer lookup.  */
+          s = fgetxattr (fd, REDIRECT_XATTR, path, sizeof (path) - 1);
+          if (s > 0)
+            path[s] = '\0';
+
+          close (fd);
         }
     }
 
@@ -660,14 +676,7 @@ load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *p
 
           child = hash_lookup (n->children, &key);
           if (child)
-            {
-              /* Update the ino with the lowest one found.  Ignore if the file
-                 was deleted by intermediate layers, we only need to keep the same
-                 inode after a copyup.  */
-              child->ino = st.st_ino;
-              child->present_lowerdir = 1;
-              continue;
-            }
+            continue;
 
           wh = get_whiteout_name (dent->d_name, &st);
           if (wh)
@@ -685,7 +694,7 @@ load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *p
               bool dirp = st.st_mode & S_IFDIR;
 
               sprintf (path, "%s/%s", n->path, dent->d_name);
-              child = make_lo_node (path, it, dent->d_name, st.st_ino, dirp);
+              child = make_lo_node (path, it, dent->d_name, 0, dirp);
 
               if (child == NULL)
                 {
@@ -818,22 +827,17 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
               return NULL;
             }
 
-          if (node)
-            node->ino = st.st_ino;
-          else
+          node = make_lo_node (path, it, name, 0, st.st_mode & S_IFDIR);
+          if (node == NULL)
             {
-              node = make_lo_node (path, it, name, st.st_ino, st.st_mode & S_IFDIR);
-              if (node == NULL)
-                {
-                  errno = ENOMEM;
-                  return NULL;
-                }
-              if (insert_node (pnode, node, false) == NULL)
-                {
-                  node_free (node);
-                  errno = ENOMEM;
-                  return NULL;
-                }
+              errno = ENOMEM;
+              return NULL;
+            }
+          if (insert_node (pnode, node, false) == NULL)
+            {
+              node_free (node);
+              errno = ENOMEM;
+              return NULL;
             }
         }
     }
@@ -1069,7 +1073,7 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   ssize_t len;
   struct lo_node *node;
   struct lo_data *lo = lo_data (req);
-  char buf[1024];
+  char *buf = NULL;
   int fd;
 
   if (lo_debug (req))
@@ -1082,14 +1086,25 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
+  if (size > 0)
+    {
+      buf = malloc (size);
+      if (buf == NULL)
+        {
+          fuse_reply_err (req, ENOMEM);
+          return;
+        }
+    }
+
   fd = openat (node_dirfd (node), node->path, O_RDONLY);
   if (fd < 0)
     {
+      free (buf);
       fuse_reply_err (req, errno);
       return;
     }
 
-  len = flistxattr (fd, buf, sizeof (buf));
+  len = flistxattr (fd, buf, size);
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
@@ -1097,6 +1112,7 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   else if (len <= size)
     fuse_reply_buf (req, buf, len);
 
+  free (buf);
   close (fd);
 }
 
@@ -1106,7 +1122,7 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   ssize_t len;
   struct lo_node *node;
   struct lo_data *lo = lo_data (req);
-  char buf[1024];
+  char *buf = NULL;
   int fd;
 
   if (lo_debug (req))
@@ -1119,14 +1135,25 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
+  if (size > 0)
+    {
+      buf = malloc (size);
+      if (buf == NULL)
+        {
+          fuse_reply_err (req, ENOMEM);
+          return;
+        }
+    }
+
   fd = openat (node_dirfd (node), node->path, O_RDONLY);
   if (fd < 0)
     {
+      free (buf);
       fuse_reply_err (req, errno);
       return;
     }
 
-  len = fgetxattr (fd, name, buf, sizeof (buf));
+  len = fgetxattr (fd, name, buf, size);
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
@@ -1134,6 +1161,7 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   else if (len <= size)
     fuse_reply_buf (req, buf, len);
 
+  free (buf);
   close (fd);
 }
 
@@ -2002,6 +2030,16 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
     {
       fuse_reply_err (req, errno);
       return;
+    }
+  else
+    {
+      int dfd = openat (node_dirfd (newparentnode), path, O_WRONLY);
+      if (dfd >= 0)
+        {
+          fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
+          close (dfd);
+        }
+
     }
 
   node = make_lo_node (path, get_upper_layer (lo), newname, node->ino, false);
