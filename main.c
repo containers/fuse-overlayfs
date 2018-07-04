@@ -1210,16 +1210,17 @@ copyup (struct lo_data *lo, struct lo_node *node)
   int ret = -1;
   int dfd = -1, sfd = -1;
   struct stat st;
-  int r;
   const size_t buf_size = 1 << 20;
   char *buf = NULL;
   struct timespec times[2];
+  ssize_t xattr_len;
+
 
   if (node->parent)
     {
-      r = create_directory (lo, node->parent);
-      if (r < 0)
-        return r;
+      ret = create_directory (lo, node->parent);
+      if (ret < 0)
+        return ret;
     }
 
   if (fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW) < 0)
@@ -1283,20 +1284,40 @@ copyup (struct lo_data *lo, struct lo_node *node)
 
       written = 0;
       {
-        r = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
-        if (r < 0)
+        ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
+        if (ret < 0)
           goto exit;
-
-        written += r;
-        nread -= r;
+        written += ret;
+        nread -= ret;
       }
       while (nread);
     }
 
   times[0] = st.st_atim;
   times[1] = st.st_mtim;
-  if (futimens (dfd, times) < 0)
+  ret = futimens (dfd, times);
+  if (ret < 0)
     goto exit;
+
+  xattr_len = flistxattr (sfd, buf, buf_size / 2);
+  if (xattr_len > 0)
+    {
+      char *it;
+      char *xattr_buf = buf + buf_size / 2;
+      for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
+        {
+          ssize_t s = fgetxattr (sfd, it, xattr_buf, buf_size / 2);
+          if (s < 0)
+            {
+              ret = -1;
+              goto exit;
+            }
+          ret = fsetxattr (dfd, it, xattr_buf, s, 0);
+          if (ret < 0)
+            goto exit;
+        }
+    }
+
 
  success:
   ret = 0;
@@ -1310,6 +1331,8 @@ copyup (struct lo_data *lo, struct lo_node *node)
     close (sfd);
   if (dfd >= 0)
     close (dfd);
+  if (ret < 0)
+    unlinkat (get_upper_layer (lo)->fd, node->path, 0);
   errno = saved_errno;
 
   return ret;
