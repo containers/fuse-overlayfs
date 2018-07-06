@@ -1187,6 +1187,29 @@ lo_access (fuse_req_t req, fuse_ino_t ino, int mask)
 }
 
 static int
+copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
+{
+  size_t xattr_len;
+
+  xattr_len = flistxattr (sfd, buf, buf_size / 2);
+  if (xattr_len > 0)
+    {
+      char *it;
+      char *xattr_buf = buf + buf_size / 2;
+      for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
+        {
+          ssize_t s = fgetxattr (sfd, it, xattr_buf, buf_size / 2);
+          if (s < 0)
+            return -1;
+
+          if (fsetxattr (dfd, it, xattr_buf, s, 0) < 0)
+            return -1;
+        }
+    }
+  return 0;
+}
+
+static int
 create_directory (struct lo_data *lo, struct lo_node *src)
 {
   int ret;
@@ -1247,7 +1270,6 @@ copyup (struct lo_data *lo, struct lo_node *node)
   const size_t buf_size = 1 << 20;
   char *buf = NULL;
   struct timespec times[2];
-  ssize_t xattr_len;
   char wd_tmp_file_name[32];
 
   if (node->parent)
@@ -1335,24 +1357,9 @@ copyup (struct lo_data *lo, struct lo_node *node)
   if (ret < 0)
     goto exit;
 
-  xattr_len = flistxattr (sfd, buf, buf_size / 2);
-  if (xattr_len > 0)
-    {
-      char *it;
-      char *xattr_buf = buf + buf_size / 2;
-      for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
-        {
-          ssize_t s = fgetxattr (sfd, it, xattr_buf, buf_size / 2);
-          if (s < 0)
-            {
-              ret = -1;
-              goto exit;
-            }
-          ret = fsetxattr (dfd, it, xattr_buf, s, 0);
-          if (ret < 0)
-            goto exit;
-        }
-    }
+  ret = copy_xattr (sfd, dfd, buf, buf_size);
+  if (ret < 0)
+    goto exit;
 
   /* Finally, move the file to its destination.  */
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, node->path);
