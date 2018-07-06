@@ -148,6 +148,13 @@ lo_data (fuse_req_t req)
   return (struct lo_data *) fuse_req_userdata (req);
 }
 
+static unsigned long
+get_next_wd_counter ()
+{
+  static unsigned long counter = 1;
+  return counter++;
+}
+
 static struct lo_mapping *
 read_mappings (const char *str)
 {
@@ -280,9 +287,8 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
   char *newpath;
-  static unsigned long counter = 1;
 
-  asprintf (&newpath, "%lu", counter++);
+  asprintf (&newpath, "%lu", get_next_wd_counter ());
   if (newpath == NULL)
     {
       unlink (dest);
@@ -1242,7 +1248,7 @@ copyup (struct lo_data *lo, struct lo_node *node)
   char *buf = NULL;
   struct timespec times[2];
   ssize_t xattr_len;
-
+  char wd_tmp_file_name[32];
 
   if (node->parent)
     {
@@ -1250,6 +1256,8 @@ copyup (struct lo_data *lo, struct lo_node *node)
       if (ret < 0)
         return ret;
     }
+
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
   if (fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW) < 0)
     goto exit;
@@ -1287,7 +1295,7 @@ copyup (struct lo_data *lo, struct lo_node *node)
   if (sfd < 0)
     goto exit;
 
-  dfd = openat (get_upper_layer (lo)->fd, node->path, O_CREAT|O_WRONLY, st.st_mode);
+  dfd = openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode);
   if (dfd < 0)
     goto exit;
 
@@ -1346,6 +1354,10 @@ copyup (struct lo_data *lo, struct lo_node *node)
         }
     }
 
+  /* Finally, move the file to its destination.  */
+  ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, node->path);
+  if (ret < 0)
+    goto exit;
 
  success:
   ret = 0;
@@ -1360,7 +1372,7 @@ copyup (struct lo_data *lo, struct lo_node *node)
   if (dfd >= 0)
     close (dfd);
   if (ret < 0)
-    unlinkat (get_upper_layer (lo)->fd, node->path, 0);
+    unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
   errno = saved_errno;
 
   return ret;
