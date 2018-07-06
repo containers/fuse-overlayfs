@@ -1214,6 +1214,10 @@ create_directory (struct lo_data *lo, struct lo_node *src)
 {
   int ret;
   struct stat st;
+  int sfd = -1, dfd = -1;
+  char *buf = NULL;
+  char wd_tmp_file_name[32];
+  struct timespec times[2];
 
   if (src == NULL)
     return 0;
@@ -1221,31 +1225,72 @@ create_directory (struct lo_data *lo, struct lo_node *src)
   if (src->layer == get_upper_layer (lo))
     return 0;
 
-  ret = fstatat (node_dirfd (src), src->path, &st, AT_SYMLINK_NOFOLLOW);
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
+  ret = sfd = openat (node_dirfd (src), src->path, O_RDONLY);
   if (ret < 0)
     goto out;
 
-  ret = mkdirat (get_upper_layer (lo)->fd, src->path, st.st_mode);
-  if (ret < 0 && errno == EEXIST)
-    {
-      ret = 0;
-      goto out;
-    }
-  else if (ret < 0 && errno == ENOENT)
-    {
-      ret = create_directory (lo, src->parent);
-      if (ret != 0)
-        goto out;
+  ret = fstat (sfd, &st);
+  if (ret < 0)
+    return ret;
 
-      ret = mkdirat (lo->layers[0].fd, src->path, st.st_mode);
+  ret = mkdirat (lo->workdir_fd, wd_tmp_file_name, st.st_mode);
+  if (ret < 0)
+    goto out;
+
+  ret = dfd = openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY);
+  if (ret < 0)
+    goto out;
+
+  ret = fchown (dfd, st.st_uid, st.st_gid);
+  if (ret < 0)
+    goto out;
+
+  times[0] = st.st_atim;
+  times[1] = st.st_mtim;
+  ret = futimens (dfd, times);
+  if (ret < 0)
+    goto out;
+
+  if (ret == 0)
+    {
+      const size_t buf_size = 1 << 20;
+      char *buf = malloc (buf_size);
+      if (buf == NULL)
+        {
+          ret = -1;
+          goto out;
+        }
+
+      ret = copy_xattr (sfd, dfd, buf, buf_size);
       if (ret < 0)
         goto out;
-
-      ret = fchownat (lo->layers[0].fd, src->path, st.st_uid, st.st_gid, AT_SYMLINK_NOFOLLOW);
     }
 
+  ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, src->path);
+  if (ret < 0)
+    {
+      if (errno == ENOENT && src->parent)
+        {
+          ret = create_directory (lo, src->parent);
+          if (ret != 0)
+            goto out;
+        }
+
+      ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, src->path);
+    }
 out:
-  if (ret == 0)
+  if (sfd >= 0)
+    close (sfd);
+  if (dfd >= 0)
+    close (dfd);
+  if (buf)
+    free (buf);
+
+  if (ret < 0)
+      unlinkat (lo->workdir_fd, wd_tmp_file_name, AT_REMOVEDIR);
+  else
     {
       src->layer = get_upper_layer (lo);
 
@@ -1272,20 +1317,18 @@ copyup (struct lo_data *lo, struct lo_node *node)
   struct timespec times[2];
   char wd_tmp_file_name[32];
 
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
+  ret = fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW);
+  if (ret < 0)
+    return ret;
+
   if (node->parent)
     {
       ret = create_directory (lo, node->parent);
       if (ret < 0)
         return ret;
-    }
 
-  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
-
-  if (fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW) < 0)
-    goto exit;
-
-  if (node->parent)
-    {
       char whpath[PATH_MAX + 10];
       sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
       if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
@@ -2058,7 +2101,6 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
           fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
           close (dfd);
         }
-
     }
 
   node = make_lo_node (path, get_upper_layer (lo), newname, node->ino, false);
