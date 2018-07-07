@@ -2319,6 +2319,12 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       rm = hash_lookup (destpnode->children, &key);
       if (rm)
         {
+          if (rm->ino == node->ino)
+            {
+              fuse_reply_err (req, 0);
+              return;
+            }
+
           hash_delete (destpnode->children, rm);
           if (rm->lookups > 0)
             node_free (rm);
