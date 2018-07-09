@@ -1521,12 +1521,20 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
         {
           DIR *dp;
           size_t c = 0;
-          int fd = openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY);
+          int fd;
+
+          fd = openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY);
+          if (fd < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
 
           if (node->children)
             c = count_dir_entries (node);
           if (c)
             {
+              close (fd);
               fuse_reply_err (req, ENOTEMPTY);
               return;
             }
