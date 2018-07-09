@@ -134,9 +134,9 @@ static const struct fuse_opt cfs_opts[] = {
    offsetof (struct cfs_data, upperdir), 0},
   {"workdir=%s",
    offsetof (struct cfs_data, workdir), 0},
-  {"uid=%s",
+  {"uidmapping=%s",
    offsetof (struct cfs_data, uid_str), 0},
-  {"gid=%s",
+  {"gidmapping=%s",
    offsetof (struct cfs_data, gid_str), 0},
   FUSE_OPT_END
 };
