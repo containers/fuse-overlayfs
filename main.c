@@ -1,4 +1,4 @@
-/* containers: Overlay Filesystem in Userspace
+/* fuse-overlayfs: Overlay Filesystem in Userspace
 
    Copyright (C) 2018 Giuseppe Scrivano <giuseppe@scrivano.org>
    Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
@@ -58,7 +58,7 @@
 #define ATTR_TIMEOUT 1000000000.0
 #define ENTRY_TIMEOUT 1000000000.0
 
-#define REDIRECT_XATTR "user.containerfs.redirect"
+#define REDIRECT_XATTR "user.fuseoverlayfs.redirect"
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 

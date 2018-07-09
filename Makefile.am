@@ -1,27 +1,27 @@
 SUBDIRS = lib
 
-bin_PROGRAMS = containerfs
+bin_PROGRAMS = fuse-overlayfs
 
 ACLOCAL_AMFLAGS = -Im4
 
-EXTRA_DIST = m4/gnulib-cache.m4 rpm/containerfs.spec.template autogen.sh
+EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh
 
-containerfs_CFLAGS = -I . -I lib $(FUSE_CFLAGS)
-containerfs_LDFLAGS = $(FUSE_LIBS)
-containerfs_LDADD = lib/libgnu.a
-containerfs_SOURCES = main.c
+fuse_overlayfs_CFLAGS = -I . -I lib $(FUSE_CFLAGS)
+fuse_overlayfs_LDFLAGS = $(FUSE_LIBS)
+fuse_overlayfs_LDADD = lib/libgnu.a
+fuse_overlayfs_SOURCES = main.c
 
 WD := $(shell pwd)
 
-containerfs.spec: $(srcdir)/rpm/containerfs.spec.template
+fuse-overlayfs.spec: $(srcdir)/rpm/fuse-overlayfs.spec.template
 	sed -e 's|#VERSION#|$(VERSION)|g' < $< > $@
 
-rpm: dist-gzip containerfs.spec
+rpm: dist-gzip fuse-overlayfs.spec
 	echo $(VERSION)
 	$(MAKE) -C $(WD) dist-xz
-	rpmbuild -ba --define "_sourcedir $(WD)" --define "_specdir $(WD)" --define "_builddir $(WD)" --define "_srcrpmdir $(WD)" --define "_rpmdir $(WD)" --define "_buildrootdir $(WD)/.build" containerfs.spec
+	rpmbuild -ba --define "_sourcedir $(WD)" --define "_specdir $(WD)" --define "_builddir $(WD)" --define "_srcrpmdir $(WD)" --define "_rpmdir $(WD)" --define "_buildrootdir $(WD)/.build" fuse-overlayfs.spec
 
-srpm: dist-gzip containerfs.spec
+srpm: dist-gzip fuse-overlayfs.spec
 	echo $(VERSION)
 	$(MAKE) -C $(WD) dist-xz
-	rpmbuild -bs --define "_sourcedir $(WD)" --define "_specdir $(WD)" --define "_builddir $(WD)" --define "_srcrpmdir $(WD)" --define "_rpmdir $(WD)" --define "_buildrootdir $(WD)/.build" containerfs.spec
+	rpmbuild -bs --define "_sourcedir $(WD)" --define "_specdir $(WD)" --define "_builddir $(WD)" --define "_srcrpmdir $(WD)" --define "_rpmdir $(WD)" --define "_buildrootdir $(WD)/.build" fuse-overlayfs.spec

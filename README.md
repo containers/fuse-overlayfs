@@ -1,4 +1,4 @@
-containerfs
+fuse-overlayfs
 ===========
 
 An implementation of overlay+shiftfs in FUSE for rootless containers.
@@ -13,11 +13,11 @@ Usage:
 =======================================================
 
 ```
-$ containerfs -o lowerdir=lowerdir/a:lowerdir/b,upperdir=up,workdir=workdir merged
+$ fuse-overlayfs -o lowerdir=lowerdir/a:lowerdir/b,upperdir=up,workdir=workdir merged
 ```
 
 Specify a different UID/GID mapping:
 
 ```
-$ containerfs -o uid=0:10:100:100:10000:2000,gid=0:10:100:100:10000:2000,lowerdir=lowerdir/a:lowerdir/b,upperdir=up,workdir=workdir merged
+$ fuse-overlayfs -o uid=0:10:100:100:10000:2000,gid=0:10:100:100:10000:2000,lowerdir=lowerdir/a:lowerdir/b,upperdir=up,workdir=workdir merged
 ```

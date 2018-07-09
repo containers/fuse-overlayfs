@@ -1,10 +1,10 @@
 Summary: FUSE filesystem for containers.
-Name: containerfs
+Name: fuse-overlayfs
 Version: #VERSION#
 Release: 1%{?dist}
 Source0: %{url}/archive/%{name}-%{version}.tar.gz
 License: GPLv3+
-URL: https://github.com/giuseppe/containerfs
+URL: https://github.com/giuseppe/fuse-overlayfs
 
 # We always run autogen.sh
 BuildRequires: autoconf automake
@@ -17,7 +17,7 @@ BuildRequires: autoconf
 BuildRequires: fuse3-devel
 
 %description
-containerfs is a FUSE overlayfs implementation.
+fuse-overlayfs is a FUSE overlayfs implementation.
 
 %prep
 %autosetup -n %{name}-%{version}
