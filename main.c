@@ -73,27 +73,27 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
-struct cfs_layer
+struct ovl_layer
 {
-  struct cfs_layer *next;
+  struct ovl_layer *next;
   char *path;
   int fd;
   bool low;
 };
 
-struct cfs_mapping
+struct ovl_mapping
 {
-  struct cfs_mapping *next;
+  struct ovl_mapping *next;
   unsigned int host;
   unsigned int to;
   unsigned int len;
 };
 
-struct cfs_node
+struct ovl_node
 {
-  struct cfs_node *parent;
+  struct ovl_node *parent;
   Hash_table *children;
-  struct cfs_layer *layer;
+  struct ovl_layer *layer;
   char *path;
   char *name;
   int lookups;
@@ -107,44 +107,44 @@ struct cfs_node
   unsigned int whiteout : 1;
 };
 
-struct cfs_data
+struct ovl_data
 {
   struct fuse_session *se;
   int debug;
   char *uid_str;
   char *gid_str;
-  struct cfs_mapping *uid_mappings;
-  struct cfs_mapping *gid_mappings;
+  struct ovl_mapping *uid_mappings;
+  struct ovl_mapping *gid_mappings;
   char *lowerdir;
   char *context;
   char *upperdir;
   char *workdir;
   int workdir_fd;
-  struct cfs_layer *layers;
+  struct ovl_layer *layers;
 
-  struct cfs_node *root;
+  struct ovl_node *root;
 };
 
-static const struct fuse_opt cfs_opts[] = {
+static const struct fuse_opt ovl_opts[] = {
   {"context=%s",
-   offsetof (struct cfs_data, context), 0},
+   offsetof (struct ovl_data, context), 0},
   {"lowerdir=%s",
-   offsetof (struct cfs_data, lowerdir), 0},
+   offsetof (struct ovl_data, lowerdir), 0},
   {"upperdir=%s",
-   offsetof (struct cfs_data, upperdir), 0},
+   offsetof (struct ovl_data, upperdir), 0},
   {"workdir=%s",
-   offsetof (struct cfs_data, workdir), 0},
+   offsetof (struct ovl_data, workdir), 0},
   {"uidmapping=%s",
-   offsetof (struct cfs_data, uid_str), 0},
+   offsetof (struct ovl_data, uid_str), 0},
   {"gidmapping=%s",
-   offsetof (struct cfs_data, gid_str), 0},
+   offsetof (struct ovl_data, gid_str), 0},
   FUSE_OPT_END
 };
 
-static struct cfs_data *
-cfs_data (fuse_req_t req)
+static struct ovl_data *
+ovl_data (fuse_req_t req)
 {
-  return (struct cfs_data *) fuse_req_userdata (req);
+  return (struct ovl_data *) fuse_req_userdata (req);
 }
 
 static unsigned long
@@ -154,11 +154,11 @@ get_next_wd_counter ()
   return counter++;
 }
 
-static struct cfs_mapping *
+static struct ovl_mapping *
 read_mappings (const char *str)
 {
   char *buf = NULL, *saveptr = NULL, *it, *endptr;
-  struct cfs_mapping *tmp, *ret = NULL;
+  struct ovl_mapping *tmp, *ret = NULL;
   unsigned int a, b, c;
   int state = 0;
 
@@ -208,9 +208,9 @@ read_mappings (const char *str)
 }
 
 static void
-free_mapping (struct cfs_mapping *it)
+free_mapping (struct ovl_mapping *it)
 {
-  struct cfs_mapping *next = NULL;
+  struct ovl_mapping *next = NULL;
   for (; it; it = next)
     {
       next = it->next;
@@ -220,9 +220,9 @@ free_mapping (struct cfs_mapping *it)
 
 /* Useful in a gdb session.  */
 void
-dump_directory (struct cfs_node *node)
+dump_directory (struct ovl_node *node)
 {
-  struct cfs_node *it;
+  struct ovl_node *it;
 
   if (node->children == NULL)
     return;
@@ -232,32 +232,32 @@ dump_directory (struct cfs_node *node)
 }
 
 static bool
-cfs_debug (fuse_req_t req)
+ovl_debug (fuse_req_t req)
 {
-  return cfs_data (req)->debug != 0;
+  return ovl_data (req)->debug != 0;
 }
 
 static void
-cfs_init (void *userdata, struct fuse_conn_info *conn)
+ovl_init (void *userdata, struct fuse_conn_info *conn)
 {
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_MOVE;
   conn->want &= ~FUSE_CAP_PARALLEL_DIROPS;
 }
 
-static struct cfs_layer *
-get_upper_layer (struct cfs_data *lo)
+static struct ovl_layer *
+get_upper_layer (struct ovl_data *lo)
 {
   return lo->layers;
 }
 
 static inline bool
-node_dirp (struct cfs_node *n)
+node_dirp (struct ovl_node *n)
 {
   return n->children != NULL;
 }
 
 static int
-node_dirfd (struct cfs_node *n)
+node_dirfd (struct ovl_node *n)
 {
   if (n->hidden)
     return n->hidden_dirfd;
@@ -282,7 +282,7 @@ has_prefix (const char *str, const char *pref)
 }
 
 static int
-hide_node (struct cfs_data *lo, struct cfs_node *node, bool unlink_src)
+hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
   char *newpath;
@@ -327,7 +327,7 @@ hide_node (struct cfs_data *lo, struct cfs_node *node, bool unlink_src)
 }
 
 static unsigned int
-find_mapping (unsigned int id, struct cfs_mapping *mapping, bool direct)
+find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct)
 {
   if (mapping == NULL)
     return id;
@@ -348,22 +348,22 @@ find_mapping (unsigned int id, struct cfs_mapping *mapping, bool direct)
 }
 
 static uid_t
-get_uid (struct cfs_data *data, uid_t id)
+get_uid (struct ovl_data *data, uid_t id)
 {
   return find_mapping (id, data->uid_mappings, false);
 }
 
 static uid_t
-get_gid (struct cfs_data *data, gid_t id)
+get_gid (struct ovl_data *data, gid_t id)
 {
   return find_mapping (id, data->gid_mappings, false);
 }
 
 static int
-rpl_stat (fuse_req_t req, struct cfs_node *node, struct stat *st)
+rpl_stat (fuse_req_t req, struct ovl_node *node, struct stat *st)
 {
   int ret;
-  struct cfs_data *data = cfs_data (req);
+  struct ovl_data *data = ovl_data (req);
 
   ret = TEMP_FAILURE_RETRY (fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW));
   if (ret < 0)
@@ -375,7 +375,7 @@ rpl_stat (fuse_req_t req, struct cfs_node *node, struct stat *st)
   st->st_ino = node->ino;
   if (ret == 0 && node_dirp (node))
     {
-      struct cfs_node *it;
+      struct ovl_node *it;
 
       st->st_nlink = 2;
 
@@ -392,7 +392,7 @@ rpl_stat (fuse_req_t req, struct cfs_node *node, struct stat *st)
 static void
 node_mark_all_free (void *p)
 {
-  struct cfs_node *it, *n = (struct cfs_node *) p;
+  struct ovl_node *it, *n = (struct ovl_node *) p;
 
   n->lookups = 0;
 
@@ -406,7 +406,7 @@ node_mark_all_free (void *p)
 static void
 node_free (void *p)
 {
-  struct cfs_node *n = (struct cfs_node *) p;
+  struct ovl_node *n = (struct ovl_node *) p;
   if (n->parent)
     {
       if (hash_lookup (n->parent->children, n) == n)
@@ -419,7 +419,7 @@ node_free (void *p)
 
   if (n->children)
     {
-      struct cfs_node *it;
+      struct ovl_node *it;
 
       for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
         it->parent = NULL;
@@ -442,12 +442,12 @@ node_free (void *p)
 static void
 do_forget (fuse_ino_t ino, uint64_t nlookup)
 {
-  struct cfs_node *n;
+  struct ovl_node *n;
 
   if (ino == FUSE_ROOT_ID)
     return;
 
-  n = (struct cfs_node *) ino;
+  n = (struct ovl_node *) ino;
 
   n->lookups -= nlookup;
   if (n->lookups <= 0)
@@ -455,10 +455,10 @@ do_forget (fuse_ino_t ino, uint64_t nlookup)
 }
 
 static void
-cfs_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
+ovl_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 {
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
 	     ino, nlookup);
   do_forget (ino, nlookup);
   fuse_reply_none (req);
@@ -467,23 +467,23 @@ cfs_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 static size_t
 node_hasher (const void *p, size_t s)
 {
-  struct cfs_node *n = (struct cfs_node *) p;
+  struct ovl_node *n = (struct ovl_node *) p;
   return hash_string (n->name, s);
 }
 
 static bool
 node_compare (const void *n1, const void *n2)
 {
-  struct cfs_node *node1 = (struct cfs_node *) n1;
-  struct cfs_node *node2 = (struct cfs_node *) n2;
+  struct ovl_node *node1 = (struct ovl_node *) n1;
+  struct ovl_node *node2 = (struct ovl_node *) n2;
 
   return strcmp (node1->name, node2->name) == 0 ? true : false;
 }
 
-static struct cfs_node *
+static struct ovl_node *
 make_whiteout_node (const char *name)
 {
-  struct cfs_node *ret = calloc (1, sizeof (*ret));
+  struct ovl_node *ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
     {
       errno = ENOMEM;
@@ -500,10 +500,10 @@ make_whiteout_node (const char *name)
   return ret;
 }
 
-static struct cfs_node *
-make_cfs_node (const char *path, struct cfs_layer *layer, const char *name, ino_t ino, bool dir_p)
+static struct ovl_node *
+make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p)
 {
-  struct cfs_node *ret = malloc (sizeof (*ret));
+  struct ovl_node *ret = malloc (sizeof (*ret));
   if (ret == NULL)
     {
       errno = ENOMEM;
@@ -558,7 +558,7 @@ make_cfs_node (const char *path, struct cfs_layer *layer, const char *name, ino_
   if (ret->ino == 0)
     {
       struct stat st;
-      struct cfs_layer *it;
+      struct ovl_layer *it;
       char path[PATH_MAX];
 
       strcpy (path, ret->path);
@@ -584,10 +584,10 @@ make_cfs_node (const char *path, struct cfs_layer *layer, const char *name, ino_
   return ret;
 }
 
-static struct cfs_node *
-insert_node (struct cfs_node *parent, struct cfs_node *item, bool replace)
+static struct ovl_node *
+insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
 {
-  struct cfs_node *old = NULL, *prev_parent = item->parent;
+  struct ovl_node *old = NULL, *prev_parent = item->parent;
   int ret;
 
   if (prev_parent)
@@ -633,17 +633,17 @@ get_whiteout_name (const char *name, struct stat *st)
   return NULL;
 }
 
-static struct cfs_node *
-load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char *path, char *name)
+static struct ovl_node *
+load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char *path, char *name)
 {
   DIR *dp;
   struct dirent *dent;
   struct stat st;
-  struct cfs_layer *it;
+  struct ovl_layer *it;
 
   if (!n)
     {
-      n = make_cfs_node (path, layer, name, 0, true);
+      n = make_ovl_node (path, layer, name, 0, true);
       if (n == NULL)
         return NULL;
     }
@@ -663,10 +663,10 @@ load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char
 
       while (((dent = readdir (dp)) != NULL))
         {
-          struct cfs_node key;
+          struct ovl_node key;
           const char *wh;
           char path[PATH_MAX + 1];
-          struct cfs_node *child = NULL;
+          struct ovl_node *child = NULL;
 
           key.name = dent->d_name;
 
@@ -699,7 +699,7 @@ load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char
               bool dirp = st.st_mode & S_IFDIR;
 
               sprintf (path, "%s/%s", n->path, dent->d_name);
-              child = make_cfs_node (path, it, dent->d_name, 0, dirp);
+              child = make_ovl_node (path, it, dent->d_name, 0, dirp);
 
               if (child == NULL)
                 {
@@ -722,7 +722,7 @@ load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char
 }
 
 static void
-free_layers (struct cfs_layer *layers)
+free_layers (struct ovl_layer *layers)
 {
   if (layers == NULL)
     return;
@@ -733,8 +733,8 @@ free_layers (struct cfs_layer *layers)
   free (layers);
 }
 
-static struct cfs_layer *
-read_dirs (char *path, bool low, struct cfs_layer *layers)
+static struct ovl_layer *
+read_dirs (char *path, bool low, struct ovl_layer *layers)
 {
   char *buf = NULL, *saveptr = NULL, *it;
 
@@ -748,7 +748,7 @@ read_dirs (char *path, bool low, struct cfs_layer *layers)
   for (it = strtok_r (path, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
       char full_path[PATH_MAX + 1];
-      struct cfs_layer *l = NULL;
+      struct ovl_layer *l = NULL;
 
       if (realpath (it, full_path) < 0)
         return NULL;
@@ -785,16 +785,16 @@ read_dirs (char *path, bool low, struct cfs_layer *layers)
   return layers;
 }
 
-static struct cfs_node *
-do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
+static struct ovl_node *
+do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 {
-  struct cfs_node key;
-  struct cfs_node *node, *pnode;
+  struct ovl_node key;
+  struct ovl_node *node, *pnode;
 
   if (parent == FUSE_ROOT_ID)
     pnode = lo->root;
   else
-    pnode = (struct cfs_node *) parent;
+    pnode = (struct ovl_node *) parent;
 
   if (name == NULL)
     return pnode;
@@ -811,7 +811,7 @@ do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
     {
       int ret;
       char path[PATH_MAX];
-      struct cfs_layer *it;
+      struct ovl_layer *it;
       struct stat st;
 
       for (it = lo->layers; it; it = it->next)
@@ -832,7 +832,7 @@ do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
               return NULL;
             }
 
-          node = make_cfs_node (path, it, name, 0, st.st_mode & S_IFDIR);
+          node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR);
           if (node == NULL)
             {
               errno = ENOMEM;
@@ -856,15 +856,15 @@ do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
 }
 
 static void
-cfs_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
+ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
   struct fuse_entry_param e;
   int err = 0;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_lookup(parent=%" PRIu64 ", name=%s)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_lookup(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
 
   memset (&e, 0, sizeof (e));
@@ -890,28 +890,28 @@ cfs_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   fuse_reply_entry (req, &e);
 }
 
-struct cfs_dirp
+struct ovl_dirp
 {
-  struct cfs_data *lo;
-  struct cfs_node **tbl;
+  struct ovl_data *lo;
+  struct ovl_node **tbl;
   size_t tbl_size;
   size_t offset;
 };
 
-static struct cfs_dirp *
-cfs_dirp (struct fuse_file_info *fi)
+static struct ovl_dirp *
+ovl_dirp (struct fuse_file_info *fi)
 {
-  return (struct cfs_dirp *) (uintptr_t) fi->fh;
+  return (struct ovl_dirp *) (uintptr_t) fi->fh;
 }
 
 static void
-cfs_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   size_t counter = 0;
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *it;
-  struct cfs_dirp *d = calloc (1, sizeof (struct cfs_dirp));
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *it;
+  struct ovl_dirp *d = calloc (1, sizeof (struct ovl_dirp));
 
   if (d == NULL)
     {
@@ -938,7 +938,7 @@ cfs_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
   d->offset = 0;
   d->tbl_size = hash_get_n_entries (node->children) + 2;
-  d->tbl = malloc (sizeof (struct cfs_node *) * d->tbl_size);
+  d->tbl = malloc (sizeof (struct ovl_node *) * d->tbl_size);
   if (d->tbl == NULL)
     {
       errno = ENOMEM;
@@ -970,10 +970,10 @@ out_errno:
 }
 
 static void
-cfs_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
+ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	       off_t offset, struct fuse_file_info *fi, int plus)
 {
-  struct cfs_dirp *d = cfs_dirp (fi);
+  struct ovl_dirp *d = ovl_dirp (fi);
   size_t remaining = size;
   char *p, *buffer = calloc (size, 1);
 
@@ -989,7 +989,7 @@ cfs_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         size_t entsize;
         struct stat st;
         const char *name;
-        struct cfs_node *node = d->tbl[offset];
+        struct ovl_node *node = d->tbl[offset];
 
         if (node == NULL || node->whiteout)
           continue;
@@ -1042,28 +1042,28 @@ cfs_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 }
 
 static void
-cfs_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
+ovl_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	    off_t offset, struct fuse_file_info *fi)
 {
-  cfs_do_readdir (req, ino, size, offset, fi, 0);
+  ovl_do_readdir (req, ino, size, offset, fi, 0);
 }
 
 static void
-cfs_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
+ovl_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
 		off_t offset, struct fuse_file_info *fi)
 {
-  cfs_do_readdir (req, ino, size, offset, fi, 1);
+  ovl_do_readdir (req, ino, size, offset, fi, 1);
 }
 
 static void
-cfs_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   size_t s;
-  struct cfs_dirp *d = cfs_dirp (fi);
+  struct ovl_dirp *d = ovl_dirp (fi);
 
   for (s = 2; s < d->tbl_size; s++)
     {
-      struct cfs_node *n = d->tbl[s];
+      struct ovl_node *n = d->tbl[s];
       do_forget (NODE_TO_INODE (n), 1);
     }
 
@@ -1073,16 +1073,16 @@ cfs_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-cfs_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
+ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 {
   ssize_t len;
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
   char *buf = NULL;
   int fd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1122,16 +1122,16 @@ cfs_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 }
 
 static void
-cfs_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
+ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 {
   ssize_t len;
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
   char *buf = NULL;
   int fd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1171,14 +1171,14 @@ cfs_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 }
 
 static void
-cfs_access (fuse_req_t req, fuse_ino_t ino, int mask)
+ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 {
   int ret;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *n = do_lookup_file (lo, ino, NULL);
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *n = do_lookup_file (lo, ino, NULL);
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_access(ino=%" PRIu64 ", mask=%d)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
   ret = faccessat (node_dirfd (n), n->path, mask, AT_SYMLINK_NOFOLLOW);
@@ -1209,7 +1209,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 }
 
 static int
-create_directory (struct cfs_data *lo, struct cfs_node *src)
+create_directory (struct ovl_data *lo, struct ovl_node *src)
 {
   int ret;
   struct stat st;
@@ -1305,7 +1305,7 @@ out:
 }
 
 static int
-copyup (struct cfs_data *lo, struct cfs_node *node)
+copyup (struct ovl_data *lo, struct ovl_node *node)
 {
   int saved_errno;
   int ret = -1;
@@ -1427,8 +1427,8 @@ copyup (struct cfs_data *lo, struct cfs_node *node)
   return ret;
 }
 
-static struct cfs_node *
-get_node_up (struct cfs_data *lo, struct cfs_node *node)
+static struct ovl_node *
+get_node_up (struct ovl_data *lo, struct ovl_node *node)
 {
   int ret;
 
@@ -1445,10 +1445,10 @@ get_node_up (struct cfs_data *lo, struct cfs_node *node)
 }
 
 static size_t
-count_dir_entries (struct cfs_node *node)
+count_dir_entries (struct ovl_node *node)
 {
   size_t c = 0;
-  struct cfs_node *it;
+  struct ovl_node *it;
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
@@ -1464,9 +1464,9 @@ count_dir_entries (struct cfs_node *node)
 }
 
 static int
-update_paths (struct cfs_node *node)
+update_paths (struct ovl_node *node)
 {
-  struct cfs_node *it;
+  struct ovl_node *it;
 
   if (node == NULL)
     return 0;
@@ -1496,13 +1496,13 @@ update_paths (struct cfs_node *node)
 static void
 do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 {
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *pnode;
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *pnode;
   int fd;
   int ret = 0;
   char whiteout_path[PATH_MAX + 10];
-  struct cfs_node key, *rm;
+  struct ovl_node key, *rm;
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
@@ -1601,32 +1601,32 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 }
 
 static void
-cfs_unlink (fuse_req_t req, fuse_ino_t parent, const char *name)
+ovl_unlink (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_unlink(parent=%" PRIu64 ", name=%s)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_unlink(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
   do_rm (req, parent, name, false);
 }
 
 static void
-cfs_rmdir (fuse_req_t req, fuse_ino_t parent, const char *name)
+ovl_rmdir (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_rmdir(parent=%" PRIu64 ", name=%s)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_rmdir(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
   do_rm (req, parent, name, true);
 }
 
 static void
-cfs_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
+ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
              const char *value, size_t size, int flags)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
 
   node = do_lookup_file (lo, ino, NULL);
@@ -1653,13 +1653,13 @@ cfs_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
 }
 
 static void
-cfs_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
+ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 {
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1685,10 +1685,10 @@ cfs_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 }
 
 static int
-cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
+ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *n;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *n;
   bool readonly = (flags & (O_APPEND | O_RDWR | O_WRONLY | O_CREAT | O_TRUNC)) == 0;
   char path[PATH_MAX + 10];
   int fd;
@@ -1715,7 +1715,7 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
   if (!n)
     {
-      struct cfs_node *p;
+      struct ovl_node *p;
 
       if ((flags & O_CREAT) == 0)
         {
@@ -1746,7 +1746,7 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (fd < 0)
         return -1;
 
-      n = make_cfs_node (path, get_upper_layer (lo), name, 0, false);
+      n = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -1779,12 +1779,12 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 }
 
 static void
-cfs_read (fuse_req_t req, fuse_ino_t ino, size_t size,
+ovl_read (fuse_req_t req, fuse_ino_t ino, size_t size,
 	 off_t offset, struct fuse_file_info *fi)
 {
   struct fuse_bufvec buf = FUSE_BUFVEC_INIT (size);
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_read(ino=%" PRIu64 ", size=%zd, "
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_read(ino=%" PRIu64 ", size=%zd, "
 	     "off=%lu)\n", ino, size, (unsigned long) offset);
   buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
   buf.buf[0].fd = fi->fh;
@@ -1793,7 +1793,7 @@ cfs_read (fuse_req_t req, fuse_ino_t ino, size_t size,
 }
 
 static void
-cfs_write_buf (fuse_req_t req, fuse_ino_t ino,
+ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 	      struct fuse_bufvec *in_buf, off_t off,
 	      struct fuse_file_info *fi)
 {
@@ -1804,8 +1804,8 @@ cfs_write_buf (fuse_req_t req, fuse_ino_t ino,
   out_buf.buf[0].fd = fi->fh;
   out_buf.buf[0].pos = off;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_write_buf(ino=%" PRIu64 ", size=%zd, off=%lu, fd=%d)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_write_buf(ino=%" PRIu64 ", size=%zd, off=%lu, fd=%d)\n",
 	     ino, out_buf.buf[0].size, (unsigned long) off, (int) fi->fh);
 
   errno = 0;
@@ -1817,7 +1817,7 @@ cfs_write_buf (fuse_req_t req, fuse_ino_t ino,
 }
 
 static void
-cfs_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+ovl_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   (void) ino;
   close (fi->fh);
@@ -1825,7 +1825,7 @@ cfs_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static int
-do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct cfs_node *node)
+do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node)
 {
   int err = 0;
 
@@ -1843,21 +1843,21 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct cfs_node *node)
 }
 
 static void
-cfs_create (fuse_req_t req, fuse_ino_t parent, const char *name,
+ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 	   mode_t mode, struct fuse_file_info *fi)
 {
   int fd;
   struct fuse_entry_param e;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_create(parent=%" PRIu64 ", name=%s)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_create(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
 
   fi->flags = fi->flags | O_CREAT;
 
-  fd = cfs_do_open (req, parent, name, fi->flags, mode);
+  fd = ovl_do_open (req, parent, name, fi->flags, mode);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -1878,14 +1878,14 @@ cfs_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 }
 
 static void
-cfs_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   int fd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_open(ino=%" PRIu64 "s)\n", ino);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_open(ino=%" PRIu64 "s)\n", ino);
 
-  fd = cfs_do_open (req, ino, NULL, fi->flags, 0700);
+  fd = ovl_do_open (req, ino, NULL, fi->flags, 0700);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -1896,14 +1896,14 @@ cfs_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-cfs_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+ovl_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node;
   struct fuse_entry_param e;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_getattr(ino=%" PRIu64 "s)\n", ino);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_getattr(ino=%" PRIu64 "s)\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1922,10 +1922,10 @@ cfs_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi)
+ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node;
   struct fuse_entry_param e;
   struct stat old_st;
   struct timespec times[2];
@@ -1933,8 +1933,8 @@ cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   gid_t gid;
   int dirfd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2034,16 +2034,16 @@ cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 }
 
 static void
-cfs_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname)
+ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *node, *newparentnode, *destnode;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node, *newparentnode, *destnode;
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
 
   node = do_lookup_file (lo, newparent, newname);
   if (node != NULL)
@@ -2110,7 +2110,7 @@ cfs_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
         }
     }
 
-  node = make_cfs_node (path, get_upper_layer (lo), newname, node->ino, false);
+  node = make_ovl_node (path, get_upper_layer (lo), newname, node->ino, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2141,16 +2141,16 @@ cfs_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
 }
 
 static void
-cfs_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *name)
+ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *name)
 {
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *pnode, *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *pnode, *node;
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
 
   pnode = do_lookup_file (lo, parent, NULL);
   if (pnode == NULL)
@@ -2188,7 +2188,7 @@ cfs_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  node = make_cfs_node (path, get_upper_layer (lo), name, 0, false);
+  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2219,13 +2219,13 @@ cfs_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
 }
 
 static void
-cfs_flock (fuse_req_t req, fuse_ino_t ino,
+ovl_flock (fuse_req_t req, fuse_ino_t ino,
           struct fuse_file_info *fi, int op)
 {
   int ret, fd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_flock(ino=%" PRIu64 "s, op=%d)\n", ino, op);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_flock(ino=%" PRIu64 "s, op=%d)\n", ino, op);
 
   fd = fi->fh;
 
@@ -2235,21 +2235,21 @@ cfs_flock (fuse_req_t req, fuse_ino_t ino,
 }
 
 static void
-cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
+ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
            fuse_ino_t newparent, const char *newname,
            unsigned int flags)
 {
-  struct cfs_node *pnode, *node, *destnode, *destpnode;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_node *pnode, *node, *destnode, *destpnode;
+  struct ovl_data *lo = ovl_data (req);
   int ret;
   int saved_errno;
   char path[PATH_MAX + 1];
   int srcfd = -1;
   int destfd = -1;
-  struct cfs_node key, *rm = NULL;
+  struct ovl_node key, *rm = NULL;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
@@ -2352,7 +2352,7 @@ cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   if (flags & RENAME_EXCHANGE)
     {
-      struct cfs_node *rm1, *rm2;
+      struct ovl_node *rm1, *rm2;
       char *tmp;
 
       rm1 = hash_delete (destpnode->children, destnode);
@@ -2423,14 +2423,14 @@ cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 }
 
 static void
-cfs_statfs (fuse_req_t req, fuse_ino_t ino)
+ovl_statfs (fuse_req_t req, fuse_ino_t ino)
 {
   int ret;
   struct statvfs sfs;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_data *lo = ovl_data (req);
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_statfs(ino=%" PRIu64 "s)\n", ino);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_statfs(ino=%" PRIu64 "s)\n", ino);
 
   ret = statvfs (lo->upperdir, &sfs);
   if (ret < 0)
@@ -2442,15 +2442,15 @@ cfs_statfs (fuse_req_t req, fuse_ino_t ino)
 }
 
 static void
-cfs_readlink (fuse_req_t req, fuse_ino_t ino)
+ovl_readlink (fuse_req_t req, fuse_ino_t ino)
 {
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
   int ret = 0;
   char buf[PATH_MAX + 1];
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_readlink(ino=%" PRIu64 "s)\n", ino);
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_readlink(ino=%" PRIu64 "s)\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2476,10 +2476,10 @@ cfs_readlink (fuse_req_t req, fuse_ino_t ino)
 }
 
 static int
-hide_all (struct cfs_data *lo, struct cfs_node *node)
+hide_all (struct ovl_data *lo, struct ovl_node *node)
 {
   char b[PATH_MAX];
-  struct cfs_node *it;
+  struct ovl_node *it;
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
@@ -2496,18 +2496,18 @@ hide_all (struct cfs_data *lo, struct cfs_node *node)
 }
 
 static void
-cfs_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
+ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 {
-  struct cfs_node *node;
-  struct cfs_data *lo = cfs_data (req);
-  struct cfs_node *pnode;
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *pnode;
   int ret = 0;
   char path[PATH_MAX + 10];
   char whiteout_path[PATH_MAX + 16];
   struct fuse_entry_param e;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
 	     parent, name, mode);
 
   node = do_lookup_file (lo, parent, name);
@@ -2540,7 +2540,7 @@ cfs_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  node = make_cfs_node (path, get_upper_layer (lo), name, 0, true);
+  node = make_ovl_node (path, get_upper_layer (lo), name, 0, true);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2585,12 +2585,12 @@ cfs_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 }
 
 static void
-cfs_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
+ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
 {
   int ret, fd;
 
-  if (cfs_debug (req))
-    fprintf (stderr, "cfs_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
              ino, datasync, fi);
 
   fd = fi->fh;
@@ -2598,37 +2598,37 @@ cfs_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
-static struct fuse_lowlevel_ops cfs_oper =
+static struct fuse_lowlevel_ops ovl_oper =
   {
-   .statfs = cfs_statfs,
-   .access = cfs_access,
-   .getxattr = cfs_getxattr,
-   .removexattr = cfs_removexattr,
-   .setxattr = cfs_setxattr,
-   .listxattr = cfs_listxattr,
-   .init = cfs_init,
-   .lookup = cfs_lookup,
-   .forget = cfs_forget,
-   .getattr = cfs_getattr,
-   .readlink = cfs_readlink,
-   .opendir = cfs_opendir,
-   .readdir = cfs_readdir,
-   .readdirplus = cfs_readdirplus,
-   .releasedir = cfs_releasedir,
-   .create = cfs_create,
-   .open = cfs_open,
-   .release = cfs_release,
-   .read = cfs_read,
-   .write_buf = cfs_write_buf,
-   .unlink = cfs_unlink,
-   .rmdir = cfs_rmdir,
-   .setattr = cfs_setattr,
-   .symlink = cfs_symlink,
-   .rename = cfs_rename,
-   .mkdir = cfs_mkdir,
-   .link = cfs_link,
-   .fsync = cfs_fsync,
-   .flock = cfs_flock,
+   .statfs = ovl_statfs,
+   .access = ovl_access,
+   .getxattr = ovl_getxattr,
+   .removexattr = ovl_removexattr,
+   .setxattr = ovl_setxattr,
+   .listxattr = ovl_listxattr,
+   .init = ovl_init,
+   .lookup = ovl_lookup,
+   .forget = ovl_forget,
+   .getattr = ovl_getattr,
+   .readlink = ovl_readlink,
+   .opendir = ovl_opendir,
+   .readdir = ovl_readdir,
+   .readdirplus = ovl_readdirplus,
+   .releasedir = ovl_releasedir,
+   .create = ovl_create,
+   .open = ovl_open,
+   .release = ovl_release,
+   .read = ovl_read,
+   .write_buf = ovl_write_buf,
+   .unlink = ovl_unlink,
+   .rmdir = ovl_rmdir,
+   .setattr = ovl_setattr,
+   .symlink = ovl_symlink,
+   .rename = ovl_rename,
+   .mkdir = ovl_mkdir,
+   .link = ovl_link,
+   .fsync = ovl_fsync,
+   .flock = ovl_flock,
   };
 
 static int
@@ -2652,7 +2652,7 @@ main (int argc, char *argv[])
   struct fuse_args args = FUSE_ARGS_INIT (argc, argv);
   struct fuse_session *se;
   struct fuse_cmdline_opts opts;
-  struct cfs_data lo = {.debug = 0,
+  struct ovl_data lo = {.debug = 0,
                        .uid_mappings = NULL,
                        .gid_mappings = NULL,
                        .uid_str = NULL,
@@ -2662,7 +2662,7 @@ main (int argc, char *argv[])
   };
   int ret = -1;
 
-  if (fuse_opt_parse (&args, &lo, cfs_opts, fuse_opt_proc) == -1)
+  if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
     return 1;
   if (fuse_parse_cmdline (&args, &opts) != 0)
     return 1;
@@ -2740,7 +2740,7 @@ main (int argc, char *argv[])
         goto err_out1;
     }
 
-  se = fuse_session_new (&args, &cfs_oper, sizeof (cfs_oper), &lo);
+  se = fuse_session_new (&args, &ovl_oper, sizeof (ovl_oper), &lo);
   lo.se = se;
   if (se == NULL)
     goto err_out1;
