@@ -73,27 +73,27 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
-struct lo_layer
+struct cfs_layer
 {
-  struct lo_layer *next;
+  struct cfs_layer *next;
   char *path;
   int fd;
   bool low;
 };
 
-struct lo_mapping
+struct cfs_mapping
 {
-  struct lo_mapping *next;
+  struct cfs_mapping *next;
   unsigned int host;
   unsigned int to;
   unsigned int len;
 };
 
-struct lo_node
+struct cfs_node
 {
-  struct lo_node *parent;
+  struct cfs_node *parent;
   Hash_table *children;
-  struct lo_layer *layer;
+  struct cfs_layer *layer;
   char *path;
   char *name;
   int lookups;
@@ -107,44 +107,44 @@ struct lo_node
   unsigned int whiteout : 1;
 };
 
-struct lo_data
+struct cfs_data
 {
   struct fuse_session *se;
   int debug;
   char *uid_str;
   char *gid_str;
-  struct lo_mapping *uid_mappings;
-  struct lo_mapping *gid_mappings;
+  struct cfs_mapping *uid_mappings;
+  struct cfs_mapping *gid_mappings;
   char *lowerdir;
   char *context;
   char *upperdir;
   char *workdir;
   int workdir_fd;
-  struct lo_layer *layers;
+  struct cfs_layer *layers;
 
-  struct lo_node *root;
+  struct cfs_node *root;
 };
 
-static const struct fuse_opt lo_opts[] = {
+static const struct fuse_opt cfs_opts[] = {
   {"context=%s",
-   offsetof (struct lo_data, context), 0},
+   offsetof (struct cfs_data, context), 0},
   {"lowerdir=%s",
-   offsetof (struct lo_data, lowerdir), 0},
+   offsetof (struct cfs_data, lowerdir), 0},
   {"upperdir=%s",
-   offsetof (struct lo_data, upperdir), 0},
+   offsetof (struct cfs_data, upperdir), 0},
   {"workdir=%s",
-   offsetof (struct lo_data, workdir), 0},
+   offsetof (struct cfs_data, workdir), 0},
   {"uid=%s",
-   offsetof (struct lo_data, uid_str), 0},
+   offsetof (struct cfs_data, uid_str), 0},
   {"gid=%s",
-   offsetof (struct lo_data, gid_str), 0},
+   offsetof (struct cfs_data, gid_str), 0},
   FUSE_OPT_END
 };
 
-static struct lo_data *
-lo_data (fuse_req_t req)
+static struct cfs_data *
+cfs_data (fuse_req_t req)
 {
-  return (struct lo_data *) fuse_req_userdata (req);
+  return (struct cfs_data *) fuse_req_userdata (req);
 }
 
 static unsigned long
@@ -154,11 +154,11 @@ get_next_wd_counter ()
   return counter++;
 }
 
-static struct lo_mapping *
+static struct cfs_mapping *
 read_mappings (const char *str)
 {
   char *buf = NULL, *saveptr = NULL, *it, *endptr;
-  struct lo_mapping *tmp, *ret = NULL;
+  struct cfs_mapping *tmp, *ret = NULL;
   unsigned int a, b, c;
   int state = 0;
 
@@ -208,9 +208,9 @@ read_mappings (const char *str)
 }
 
 static void
-free_mapping (struct lo_mapping *it)
+free_mapping (struct cfs_mapping *it)
 {
-  struct lo_mapping *next = NULL;
+  struct cfs_mapping *next = NULL;
   for (; it; it = next)
     {
       next = it->next;
@@ -220,9 +220,9 @@ free_mapping (struct lo_mapping *it)
 
 /* Useful in a gdb session.  */
 void
-dump_directory (struct lo_node *node)
+dump_directory (struct cfs_node *node)
 {
-  struct lo_node *it;
+  struct cfs_node *it;
 
   if (node->children == NULL)
     return;
@@ -232,32 +232,32 @@ dump_directory (struct lo_node *node)
 }
 
 static bool
-lo_debug (fuse_req_t req)
+cfs_debug (fuse_req_t req)
 {
-  return lo_data (req)->debug != 0;
+  return cfs_data (req)->debug != 0;
 }
 
 static void
-lo_init (void *userdata, struct fuse_conn_info *conn)
+cfs_init (void *userdata, struct fuse_conn_info *conn)
 {
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_MOVE;
   conn->want &= ~FUSE_CAP_PARALLEL_DIROPS;
 }
 
-static struct lo_layer *
-get_upper_layer (struct lo_data *lo)
+static struct cfs_layer *
+get_upper_layer (struct cfs_data *lo)
 {
   return lo->layers;
 }
 
 static inline bool
-node_dirp (struct lo_node *n)
+node_dirp (struct cfs_node *n)
 {
   return n->children != NULL;
 }
 
 static int
-node_dirfd (struct lo_node *n)
+node_dirfd (struct cfs_node *n)
 {
   if (n->hidden)
     return n->hidden_dirfd;
@@ -282,7 +282,7 @@ has_prefix (const char *str, const char *pref)
 }
 
 static int
-hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
+hide_node (struct cfs_data *lo, struct cfs_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
   char *newpath;
@@ -327,7 +327,7 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
 }
 
 static unsigned int
-find_mapping (unsigned int id, struct lo_mapping *mapping, bool direct)
+find_mapping (unsigned int id, struct cfs_mapping *mapping, bool direct)
 {
   if (mapping == NULL)
     return id;
@@ -348,22 +348,22 @@ find_mapping (unsigned int id, struct lo_mapping *mapping, bool direct)
 }
 
 static uid_t
-get_uid (struct lo_data *data, uid_t id)
+get_uid (struct cfs_data *data, uid_t id)
 {
   return find_mapping (id, data->uid_mappings, false);
 }
 
 static uid_t
-get_gid (struct lo_data *data, gid_t id)
+get_gid (struct cfs_data *data, gid_t id)
 {
   return find_mapping (id, data->gid_mappings, false);
 }
 
 static int
-rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
+rpl_stat (fuse_req_t req, struct cfs_node *node, struct stat *st)
 {
   int ret;
-  struct lo_data *data = lo_data (req);
+  struct cfs_data *data = cfs_data (req);
 
   ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
   if (ret < 0)
@@ -375,7 +375,7 @@ rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
   st->st_ino = node->ino;
   if (ret == 0 && node_dirp (node))
     {
-      struct lo_node *it;
+      struct cfs_node *it;
 
       st->st_nlink = 2;
 
@@ -392,7 +392,7 @@ rpl_stat (fuse_req_t req, struct lo_node *node, struct stat *st)
 static void
 node_mark_all_free (void *p)
 {
-  struct lo_node *it, *n = (struct lo_node *) p;
+  struct cfs_node *it, *n = (struct cfs_node *) p;
 
   n->lookups = 0;
 
@@ -406,7 +406,7 @@ node_mark_all_free (void *p)
 static void
 node_free (void *p)
 {
-  struct lo_node *n = (struct lo_node *) p;
+  struct cfs_node *n = (struct cfs_node *) p;
   if (n->parent)
     {
       if (hash_lookup (n->parent->children, n) == n)
@@ -419,7 +419,7 @@ node_free (void *p)
 
   if (n->children)
     {
-      struct lo_node *it;
+      struct cfs_node *it;
 
       for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
         it->parent = NULL;
@@ -442,12 +442,12 @@ node_free (void *p)
 static void
 do_forget (fuse_ino_t ino, uint64_t nlookup)
 {
-  struct lo_node *n;
+  struct cfs_node *n;
 
   if (ino == FUSE_ROOT_ID)
     return;
 
-  n = (struct lo_node *) ino;
+  n = (struct cfs_node *) ino;
 
   n->lookups -= nlookup;
   if (n->lookups <= 0)
@@ -455,10 +455,10 @@ do_forget (fuse_ino_t ino, uint64_t nlookup)
 }
 
 static void
-lo_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
+cfs_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 {
-  if (lo_debug (req))
-    fprintf (stderr, "lo_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
 	     ino, nlookup);
   do_forget (ino, nlookup);
   fuse_reply_none (req);
@@ -467,23 +467,23 @@ lo_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 static size_t
 node_hasher (const void *p, size_t s)
 {
-  struct lo_node *n = (struct lo_node *) p;
+  struct cfs_node *n = (struct cfs_node *) p;
   return hash_string (n->name, s);
 }
 
 static bool
 node_compare (const void *n1, const void *n2)
 {
-  struct lo_node *node1 = (struct lo_node *) n1;
-  struct lo_node *node2 = (struct lo_node *) n2;
+  struct cfs_node *node1 = (struct cfs_node *) n1;
+  struct cfs_node *node2 = (struct cfs_node *) n2;
 
   return strcmp (node1->name, node2->name) == 0 ? true : false;
 }
 
-static struct lo_node *
+static struct cfs_node *
 make_whiteout_node (const char *name)
 {
-  struct lo_node *ret = calloc (1, sizeof (*ret));
+  struct cfs_node *ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
     {
       errno = ENOMEM;
@@ -500,10 +500,10 @@ make_whiteout_node (const char *name)
   return ret;
 }
 
-static struct lo_node *
-make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t ino, bool dir_p)
+static struct cfs_node *
+make_cfs_node (const char *path, struct cfs_layer *layer, const char *name, ino_t ino, bool dir_p)
 {
-  struct lo_node *ret = malloc (sizeof (*ret));
+  struct cfs_node *ret = malloc (sizeof (*ret));
   if (ret == NULL)
     {
       errno = ENOMEM;
@@ -558,7 +558,7 @@ make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t 
   if (ret->ino == 0)
     {
       struct stat st;
-      struct lo_layer *it;
+      struct cfs_layer *it;
       char path[PATH_MAX];
 
       strcpy (path, ret->path);
@@ -584,10 +584,10 @@ make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t 
   return ret;
 }
 
-static struct lo_node *
-insert_node (struct lo_node *parent, struct lo_node *item, bool replace)
+static struct cfs_node *
+insert_node (struct cfs_node *parent, struct cfs_node *item, bool replace)
 {
-  struct lo_node *old = NULL, *prev_parent = item->parent;
+  struct cfs_node *old = NULL, *prev_parent = item->parent;
   int ret;
 
   if (prev_parent)
@@ -633,17 +633,17 @@ get_whiteout_name (const char *name, struct stat *st)
   return NULL;
 }
 
-static struct lo_node *
-load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *path, char *name)
+static struct cfs_node *
+load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char *path, char *name)
 {
   DIR *dp;
   struct dirent *dent;
   struct stat st;
-  struct lo_layer *it;
+  struct cfs_layer *it;
 
   if (!n)
     {
-      n = make_lo_node (path, layer, name, 0, true);
+      n = make_cfs_node (path, layer, name, 0, true);
       if (n == NULL)
         return NULL;
     }
@@ -663,10 +663,10 @@ load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *p
 
       while (((dent = readdir (dp)) != NULL))
         {
-          struct lo_node key;
+          struct cfs_node key;
           const char *wh;
           char path[PATH_MAX + 1];
-          struct lo_node *child = NULL;
+          struct cfs_node *child = NULL;
 
           key.name = dent->d_name;
 
@@ -699,7 +699,7 @@ load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *p
               bool dirp = st.st_mode & S_IFDIR;
 
               sprintf (path, "%s/%s", n->path, dent->d_name);
-              child = make_lo_node (path, it, dent->d_name, 0, dirp);
+              child = make_cfs_node (path, it, dent->d_name, 0, dirp);
 
               if (child == NULL)
                 {
@@ -722,7 +722,7 @@ load_dir (struct lo_data *lo, struct lo_node *n, struct lo_layer *layer, char *p
 }
 
 static void
-free_layers (struct lo_layer *layers)
+free_layers (struct cfs_layer *layers)
 {
   if (layers == NULL)
     return;
@@ -733,8 +733,8 @@ free_layers (struct lo_layer *layers)
   free (layers);
 }
 
-static struct lo_layer *
-read_dirs (char *path, bool low, struct lo_layer *layers)
+static struct cfs_layer *
+read_dirs (char *path, bool low, struct cfs_layer *layers)
 {
   char *buf = NULL, *saveptr = NULL, *it;
 
@@ -748,7 +748,7 @@ read_dirs (char *path, bool low, struct lo_layer *layers)
   for (it = strtok_r (path, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
       char full_path[PATH_MAX + 1];
-      struct lo_layer *l = NULL;
+      struct cfs_layer *l = NULL;
 
       if (realpath (it, full_path) < 0)
         return NULL;
@@ -785,16 +785,16 @@ read_dirs (char *path, bool low, struct lo_layer *layers)
   return layers;
 }
 
-static struct lo_node *
-do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
+static struct cfs_node *
+do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
 {
-  struct lo_node key;
-  struct lo_node *node, *pnode;
+  struct cfs_node key;
+  struct cfs_node *node, *pnode;
 
   if (parent == FUSE_ROOT_ID)
     pnode = lo->root;
   else
-    pnode = (struct lo_node *) parent;
+    pnode = (struct cfs_node *) parent;
 
   if (name == NULL)
     return pnode;
@@ -811,7 +811,7 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
     {
       int ret;
       char path[PATH_MAX];
-      struct lo_layer *it;
+      struct cfs_layer *it;
       struct stat st;
 
       for (it = lo->layers; it; it = it->next)
@@ -832,7 +832,7 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
               return NULL;
             }
 
-          node = make_lo_node (path, it, name, 0, st.st_mode & S_IFDIR);
+          node = make_cfs_node (path, it, name, 0, st.st_mode & S_IFDIR);
           if (node == NULL)
             {
               errno = ENOMEM;
@@ -856,15 +856,15 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
 }
 
 static void
-lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
+cfs_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
   struct fuse_entry_param e;
   int err = 0;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_lookup(parent=%" PRIu64 ", name=%s)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_lookup(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
 
   memset (&e, 0, sizeof (e));
@@ -890,28 +890,28 @@ lo_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   fuse_reply_entry (req, &e);
 }
 
-struct lo_dirp
+struct cfs_dirp
 {
-  struct lo_data *lo;
-  struct lo_node **tbl;
+  struct cfs_data *lo;
+  struct cfs_node **tbl;
   size_t tbl_size;
   size_t offset;
 };
 
-static struct lo_dirp *
-lo_dirp (struct fuse_file_info *fi)
+static struct cfs_dirp *
+cfs_dirp (struct fuse_file_info *fi)
 {
-  return (struct lo_dirp *) (uintptr_t) fi->fh;
+  return (struct cfs_dirp *) (uintptr_t) fi->fh;
 }
 
 static void
-lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+cfs_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   size_t counter = 0;
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *it;
-  struct lo_dirp *d = calloc (1, sizeof (struct lo_dirp));
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *it;
+  struct cfs_dirp *d = calloc (1, sizeof (struct cfs_dirp));
 
   if (d == NULL)
     {
@@ -938,7 +938,7 @@ lo_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
   d->offset = 0;
   d->tbl_size = hash_get_n_entries (node->children) + 2;
-  d->tbl = malloc (sizeof (struct lo_node *) * d->tbl_size);
+  d->tbl = malloc (sizeof (struct cfs_node *) * d->tbl_size);
   if (d->tbl == NULL)
     {
       errno = ENOMEM;
@@ -970,10 +970,10 @@ out_errno:
 }
 
 static void
-lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
+cfs_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	       off_t offset, struct fuse_file_info *fi, int plus)
 {
-  struct lo_dirp *d = lo_dirp (fi);
+  struct cfs_dirp *d = cfs_dirp (fi);
   size_t remaining = size;
   char *p, *buffer = calloc (size, 1);
 
@@ -989,7 +989,7 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         size_t entsize;
         struct stat st;
         const char *name;
-        struct lo_node *node = d->tbl[offset];
+        struct cfs_node *node = d->tbl[offset];
 
         if (node == NULL || node->whiteout)
           continue;
@@ -1042,28 +1042,28 @@ lo_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 }
 
 static void
-lo_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
+cfs_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	    off_t offset, struct fuse_file_info *fi)
 {
-  lo_do_readdir (req, ino, size, offset, fi, 0);
+  cfs_do_readdir (req, ino, size, offset, fi, 0);
 }
 
 static void
-lo_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
+cfs_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
 		off_t offset, struct fuse_file_info *fi)
 {
-  lo_do_readdir (req, ino, size, offset, fi, 1);
+  cfs_do_readdir (req, ino, size, offset, fi, 1);
 }
 
 static void
-lo_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+cfs_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   size_t s;
-  struct lo_dirp *d = lo_dirp (fi);
+  struct cfs_dirp *d = cfs_dirp (fi);
 
   for (s = 2; s < d->tbl_size; s++)
     {
-      struct lo_node *n = d->tbl[s];
+      struct cfs_node *n = d->tbl[s];
       do_forget (NODE_TO_INODE (n), 1);
     }
 
@@ -1073,16 +1073,16 @@ lo_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
+cfs_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 {
   ssize_t len;
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
   char *buf = NULL;
   int fd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1122,16 +1122,16 @@ lo_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 }
 
 static void
-lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
+cfs_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 {
   ssize_t len;
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
   char *buf = NULL;
   int fd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1171,14 +1171,14 @@ lo_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 }
 
 static void
-lo_access (fuse_req_t req, fuse_ino_t ino, int mask)
+cfs_access (fuse_req_t req, fuse_ino_t ino, int mask)
 {
   int ret;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *n = do_lookup_file (lo, ino, NULL);
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *n = do_lookup_file (lo, ino, NULL);
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_access(ino=%" PRIu64 ", mask=%d)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
   ret = faccessat (node_dirfd (n), n->path, mask, AT_SYMLINK_NOFOLLOW);
@@ -1209,7 +1209,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 }
 
 static int
-create_directory (struct lo_data *lo, struct lo_node *src)
+create_directory (struct cfs_data *lo, struct cfs_node *src)
 {
   int ret;
   struct stat st;
@@ -1305,7 +1305,7 @@ out:
 }
 
 static int
-copyup (struct lo_data *lo, struct lo_node *node)
+copyup (struct cfs_data *lo, struct cfs_node *node)
 {
   int saved_errno;
   int ret = -1;
@@ -1427,8 +1427,8 @@ copyup (struct lo_data *lo, struct lo_node *node)
   return ret;
 }
 
-static struct lo_node *
-get_node_up (struct lo_data *lo, struct lo_node *node)
+static struct cfs_node *
+get_node_up (struct cfs_data *lo, struct cfs_node *node)
 {
   int ret;
 
@@ -1445,10 +1445,10 @@ get_node_up (struct lo_data *lo, struct lo_node *node)
 }
 
 static size_t
-count_dir_entries (struct lo_node *node)
+count_dir_entries (struct cfs_node *node)
 {
   size_t c = 0;
-  struct lo_node *it;
+  struct cfs_node *it;
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
@@ -1464,9 +1464,9 @@ count_dir_entries (struct lo_node *node)
 }
 
 static int
-update_paths (struct lo_node *node)
+update_paths (struct cfs_node *node)
 {
-  struct lo_node *it;
+  struct cfs_node *it;
 
   if (node == NULL)
     return 0;
@@ -1496,13 +1496,13 @@ update_paths (struct lo_node *node)
 static void
 do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 {
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *pnode;
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *pnode;
   int fd;
   int ret = 0;
   char whiteout_path[PATH_MAX + 10];
-  struct lo_node key, *rm;
+  struct cfs_node key, *rm;
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
@@ -1601,32 +1601,32 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 }
 
 static void
-lo_unlink (fuse_req_t req, fuse_ino_t parent, const char *name)
+cfs_unlink (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-  if (lo_debug (req))
-    fprintf (stderr, "lo_unlink(parent=%" PRIu64 ", name=%s)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_unlink(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
   do_rm (req, parent, name, false);
 }
 
 static void
-lo_rmdir (fuse_req_t req, fuse_ino_t parent, const char *name)
+cfs_rmdir (fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-  if (lo_debug (req))
-    fprintf (stderr, "lo_rmdir(parent=%" PRIu64 ", name=%s)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_rmdir(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
   do_rm (req, parent, name, true);
 }
 
 static void
-lo_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
+cfs_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
              const char *value, size_t size, int flags)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
 
   node = do_lookup_file (lo, ino, NULL);
@@ -1653,13 +1653,13 @@ lo_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
 }
 
 static void
-lo_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
+cfs_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 {
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1685,10 +1685,10 @@ lo_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 }
 
 static int
-lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
+cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *n;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *n;
   bool readonly = (flags & (O_APPEND | O_RDWR | O_WRONLY | O_CREAT | O_TRUNC)) == 0;
   char path[PATH_MAX + 10];
   int fd;
@@ -1715,7 +1715,7 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
 
   if (!n)
     {
-      struct lo_node *p;
+      struct cfs_node *p;
 
       if ((flags & O_CREAT) == 0)
         {
@@ -1746,7 +1746,7 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
       if (fd < 0)
         return -1;
 
-      n = make_lo_node (path, get_upper_layer (lo), name, 0, false);
+      n = make_cfs_node (path, get_upper_layer (lo), name, 0, false);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -1779,12 +1779,12 @@ lo_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode
 }
 
 static void
-lo_read (fuse_req_t req, fuse_ino_t ino, size_t size,
+cfs_read (fuse_req_t req, fuse_ino_t ino, size_t size,
 	 off_t offset, struct fuse_file_info *fi)
 {
   struct fuse_bufvec buf = FUSE_BUFVEC_INIT (size);
-  if (lo_debug (req))
-    fprintf (stderr, "lo_read(ino=%" PRIu64 ", size=%zd, "
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_read(ino=%" PRIu64 ", size=%zd, "
 	     "off=%lu)\n", ino, size, (unsigned long) offset);
   buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
   buf.buf[0].fd = fi->fh;
@@ -1793,7 +1793,7 @@ lo_read (fuse_req_t req, fuse_ino_t ino, size_t size,
 }
 
 static void
-lo_write_buf (fuse_req_t req, fuse_ino_t ino,
+cfs_write_buf (fuse_req_t req, fuse_ino_t ino,
 	      struct fuse_bufvec *in_buf, off_t off,
 	      struct fuse_file_info *fi)
 {
@@ -1804,8 +1804,8 @@ lo_write_buf (fuse_req_t req, fuse_ino_t ino,
   out_buf.buf[0].fd = fi->fh;
   out_buf.buf[0].pos = off;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_write_buf(ino=%" PRIu64 ", size=%zd, off=%lu, fd=%d)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_write_buf(ino=%" PRIu64 ", size=%zd, off=%lu, fd=%d)\n",
 	     ino, out_buf.buf[0].size, (unsigned long) off, (int) fi->fh);
 
   errno = 0;
@@ -1817,7 +1817,7 @@ lo_write_buf (fuse_req_t req, fuse_ino_t ino,
 }
 
 static void
-lo_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+cfs_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   (void) ino;
   close (fi->fh);
@@ -1825,7 +1825,7 @@ lo_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static int
-do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct lo_node *node)
+do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct cfs_node *node)
 {
   int err = 0;
 
@@ -1843,21 +1843,21 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct lo_node *node)
 }
 
 static void
-lo_create (fuse_req_t req, fuse_ino_t parent, const char *name,
+cfs_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 	   mode_t mode, struct fuse_file_info *fi)
 {
   int fd;
   struct fuse_entry_param e;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_create(parent=%" PRIu64 ", name=%s)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_create(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
 
   fi->flags = fi->flags | O_CREAT;
 
-  fd = lo_do_open (req, parent, name, fi->flags, mode);
+  fd = cfs_do_open (req, parent, name, fi->flags, mode);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -1878,14 +1878,14 @@ lo_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 }
 
 static void
-lo_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+cfs_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   int fd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_open(ino=%" PRIu64 "s)\n", ino);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_open(ino=%" PRIu64 "s)\n", ino);
 
-  fd = lo_do_open (req, ino, NULL, fi->flags, 0700);
+  fd = cfs_do_open (req, ino, NULL, fi->flags, 0700);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -1896,14 +1896,14 @@ lo_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-lo_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+cfs_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node;
   struct fuse_entry_param e;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_getattr(ino=%" PRIu64 "s)\n", ino);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_getattr(ino=%" PRIu64 "s)\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -1922,10 +1922,10 @@ lo_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 }
 
 static void
-lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi)
+cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node;
   struct fuse_entry_param e;
   struct stat old_st;
   struct timespec times[2];
@@ -1933,8 +1933,8 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
   gid_t gid;
   int dirfd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2034,16 +2034,16 @@ lo_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struc
 }
 
 static void
-lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname)
+cfs_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newname)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *node, *newparentnode, *destnode;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *node, *newparentnode, *destnode;
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
 
   node = do_lookup_file (lo, newparent, newname);
   if (node != NULL)
@@ -2110,7 +2110,7 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
         }
     }
 
-  node = make_lo_node (path, get_upper_layer (lo), newname, node->ino, false);
+  node = make_cfs_node (path, get_upper_layer (lo), newname, node->ino, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2141,16 +2141,16 @@ lo_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newna
 }
 
 static void
-lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *name)
+cfs_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *name)
 {
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *pnode, *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *pnode, *node;
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
 
   pnode = do_lookup_file (lo, parent, NULL);
   if (pnode == NULL)
@@ -2188,7 +2188,7 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
       return;
     }
 
-  node = make_lo_node (path, get_upper_layer (lo), name, 0, false);
+  node = make_cfs_node (path, get_upper_layer (lo), name, 0, false);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2219,13 +2219,13 @@ lo_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *nam
 }
 
 static void
-lo_flock (fuse_req_t req, fuse_ino_t ino,
+cfs_flock (fuse_req_t req, fuse_ino_t ino,
           struct fuse_file_info *fi, int op)
 {
   int ret, fd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_flock(ino=%" PRIu64 "s, op=%d)\n", ino, op);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_flock(ino=%" PRIu64 "s, op=%d)\n", ino, op);
 
   fd = fi->fh;
 
@@ -2235,21 +2235,21 @@ lo_flock (fuse_req_t req, fuse_ino_t ino,
 }
 
 static void
-lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
+cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
            fuse_ino_t newparent, const char *newname,
            unsigned int flags)
 {
-  struct lo_node *pnode, *node, *destnode, *destpnode;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_node *pnode, *node, *destnode, *destpnode;
+  struct cfs_data *lo = cfs_data (req);
   int ret;
   int saved_errno;
   char path[PATH_MAX + 1];
   int srcfd = -1;
   int destfd = -1;
-  struct lo_node key, *rm = NULL;
+  struct cfs_node key, *rm = NULL;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
@@ -2352,7 +2352,7 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   if (flags & RENAME_EXCHANGE)
     {
-      struct lo_node *rm1, *rm2;
+      struct cfs_node *rm1, *rm2;
       char *tmp;
 
       rm1 = hash_delete (destpnode->children, destnode);
@@ -2423,14 +2423,14 @@ lo_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 }
 
 static void
-lo_statfs (fuse_req_t req, fuse_ino_t ino)
+cfs_statfs (fuse_req_t req, fuse_ino_t ino)
 {
   int ret;
   struct statvfs sfs;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_data *lo = cfs_data (req);
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_statfs(ino=%" PRIu64 "s)\n", ino);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_statfs(ino=%" PRIu64 "s)\n", ino);
 
   ret = statvfs (lo->upperdir, &sfs);
   if (ret < 0)
@@ -2442,15 +2442,15 @@ lo_statfs (fuse_req_t req, fuse_ino_t ino)
 }
 
 static void
-lo_readlink (fuse_req_t req, fuse_ino_t ino)
+cfs_readlink (fuse_req_t req, fuse_ino_t ino)
 {
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
   int ret = 0;
   char buf[PATH_MAX + 1];
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_readlink(ino=%" PRIu64 "s)\n", ino);
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_readlink(ino=%" PRIu64 "s)\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2476,10 +2476,10 @@ lo_readlink (fuse_req_t req, fuse_ino_t ino)
 }
 
 static int
-hide_all (struct lo_data *lo, struct lo_node *node)
+hide_all (struct cfs_data *lo, struct cfs_node *node)
 {
   char b[PATH_MAX];
-  struct lo_node *it;
+  struct cfs_node *it;
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
@@ -2496,18 +2496,18 @@ hide_all (struct lo_data *lo, struct lo_node *node)
 }
 
 static void
-lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
+cfs_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 {
-  struct lo_node *node;
-  struct lo_data *lo = lo_data (req);
-  struct lo_node *pnode;
+  struct cfs_node *node;
+  struct cfs_data *lo = cfs_data (req);
+  struct cfs_node *pnode;
   int ret = 0;
   char path[PATH_MAX + 10];
   char whiteout_path[PATH_MAX + 16];
   struct fuse_entry_param e;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
 	     parent, name, mode);
 
   node = do_lookup_file (lo, parent, name);
@@ -2540,7 +2540,7 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  node = make_lo_node (path, get_upper_layer (lo), name, 0, true);
+  node = make_cfs_node (path, get_upper_layer (lo), name, 0, true);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2585,12 +2585,12 @@ lo_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 }
 
 static void
-lo_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
+cfs_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
 {
   int ret, fd;
 
-  if (lo_debug (req))
-    fprintf (stderr, "lo_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
+  if (cfs_debug (req))
+    fprintf (stderr, "cfs_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
              ino, datasync, fi);
 
   fd = fi->fh;
@@ -2598,37 +2598,38 @@ lo_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *f
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
-static struct fuse_lowlevel_ops lo_oper = {
-  .statfs = lo_statfs,
-  .access = lo_access,
-  .getxattr = lo_getxattr,
-  .removexattr = lo_removexattr,
-  .setxattr = lo_setxattr,
-  .listxattr = lo_listxattr,
-  .init = lo_init,
-  .lookup = lo_lookup,
-  .forget = lo_forget,
-  .getattr = lo_getattr,
-  .readlink = lo_readlink,
-  .opendir = lo_opendir,
-  .readdir = lo_readdir,
-  .readdirplus = lo_readdirplus,
-  .releasedir = lo_releasedir,
-  .create = lo_create,
-  .open = lo_open,
-  .release = lo_release,
-  .read = lo_read,
-  .write_buf = lo_write_buf,
-  .unlink = lo_unlink,
-  .rmdir = lo_rmdir,
-  .setattr = lo_setattr,
-  .symlink = lo_symlink,
-  .rename = lo_rename,
-  .mkdir = lo_mkdir,
-  .link = lo_link,
-  .fsync = lo_fsync,
-  .flock = lo_flock,
-};
+static struct fuse_lowlevel_ops cfs_oper =
+  {
+   .statfs = cfs_statfs,
+   .access = cfs_access,
+   .getxattr = cfs_getxattr,
+   .removexattr = cfs_removexattr,
+   .setxattr = cfs_setxattr,
+   .listxattr = cfs_listxattr,
+   .init = cfs_init,
+   .lookup = cfs_lookup,
+   .forget = cfs_forget,
+   .getattr = cfs_getattr,
+   .readlink = cfs_readlink,
+   .opendir = cfs_opendir,
+   .readdir = cfs_readdir,
+   .readdirplus = cfs_readdirplus,
+   .releasedir = cfs_releasedir,
+   .create = cfs_create,
+   .open = cfs_open,
+   .release = cfs_release,
+   .read = cfs_read,
+   .write_buf = cfs_write_buf,
+   .unlink = cfs_unlink,
+   .rmdir = cfs_rmdir,
+   .setattr = cfs_setattr,
+   .symlink = cfs_symlink,
+   .rename = cfs_rename,
+   .mkdir = cfs_mkdir,
+   .link = cfs_link,
+   .fsync = cfs_fsync,
+   .flock = cfs_flock,
+  };
 
 static int
 fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
@@ -2651,7 +2652,7 @@ main (int argc, char *argv[])
   struct fuse_args args = FUSE_ARGS_INIT (argc, argv);
   struct fuse_session *se;
   struct fuse_cmdline_opts opts;
-  struct lo_data lo = {.debug = 0,
+  struct cfs_data lo = {.debug = 0,
                        .uid_mappings = NULL,
                        .gid_mappings = NULL,
                        .uid_str = NULL,
@@ -2661,7 +2662,7 @@ main (int argc, char *argv[])
   };
   int ret = -1;
 
-  if (fuse_opt_parse (&args, &lo, lo_opts, fuse_opt_proc) == -1)
+  if (fuse_opt_parse (&args, &lo, cfs_opts, fuse_opt_proc) == -1)
     return 1;
   if (fuse_parse_cmdline (&args, &opts) != 0)
     return 1;
@@ -2739,7 +2740,7 @@ main (int argc, char *argv[])
         goto err_out1;
     }
 
-  se = fuse_session_new (&args, &lo_oper, sizeof (lo_oper), &lo);
+  se = fuse_session_new (&args, &cfs_oper, sizeof (cfs_oper), &lo);
   lo.se = se;
   if (se == NULL)
     goto err_out1;
