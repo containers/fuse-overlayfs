@@ -78,7 +78,7 @@ struct lo_layer
   struct lo_layer *next;
   char *path;
   int fd;
-  int low;
+  bool low;
 };
 
 struct lo_mapping
