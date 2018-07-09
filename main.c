@@ -365,7 +365,7 @@ rpl_stat (fuse_req_t req, struct cfs_node *node, struct stat *st)
   int ret;
   struct cfs_data *data = cfs_data (req);
 
-  ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
+  ret = TEMP_FAILURE_RETRY (fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW));
   if (ret < 0)
     return ret;
 
@@ -565,7 +565,7 @@ make_cfs_node (const char *path, struct cfs_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          int fd = openat (it->fd, path, O_RDONLY);
+          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY));
           if (fd < 0)
             continue;
 
@@ -650,7 +650,7 @@ load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char
 
   for (it = lo->layers; it; it = it->next)
     {
-      int fd = openat (it->fd, path, O_DIRECTORY);
+      int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_DIRECTORY));
       if (fd < 0)
         continue;
 
@@ -673,7 +673,7 @@ load_dir (struct cfs_data *lo, struct cfs_node *n, struct cfs_layer *layer, char
           if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
             continue;
 
-          if (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0)
+          if (TEMP_FAILURE_RETRY (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW)) < 0)
             {
               closedir (dp);
               return NULL;
@@ -817,7 +817,7 @@ do_lookup_file (struct cfs_data *lo, fuse_ino_t parent, const char *name)
       for (it = lo->layers; it; it = it->next)
         {
           sprintf (path, "%s/%s", pnode->path, name);
-          ret = fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW);
+          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0)
             {
               int saved_errno = errno;
@@ -1101,7 +1101,7 @@ cfs_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
         }
     }
 
-  fd = openat (node_dirfd (node), node->path, O_RDONLY);
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
   if (fd < 0)
     {
       free (buf);
@@ -1150,7 +1150,7 @@ cfs_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
         }
     }
 
-  fd = openat (node_dirfd (node), node->path, O_RDONLY);
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
   if (fd < 0)
     {
       free (buf);
@@ -1226,11 +1226,11 @@ create_directory (struct cfs_data *lo, struct cfs_node *src)
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  ret = sfd = openat (node_dirfd (src), src->path, O_RDONLY);
+  ret = sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (src), src->path, O_RDONLY));
   if (ret < 0)
     goto out;
 
-  ret = fstat (sfd, &st);
+  ret = TEMP_FAILURE_RETRY (fstat (sfd, &st));
   if (ret < 0)
     return ret;
 
@@ -1238,7 +1238,7 @@ create_directory (struct cfs_data *lo, struct cfs_node *src)
   if (ret < 0)
     goto out;
 
-  ret = dfd = openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY);
+  ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
   if (ret < 0)
     goto out;
 
@@ -1318,7 +1318,7 @@ copyup (struct cfs_data *lo, struct cfs_node *node)
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  ret = fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW);
+  ret = TEMP_FAILURE_RETRY (fstatat (node_dirfd (node), node->path, &st, AT_SYMLINK_NOFOLLOW));
   if (ret < 0)
     return ret;
 
@@ -1355,11 +1355,11 @@ copyup (struct cfs_data *lo, struct cfs_node *node)
       goto success;
     }
 
-  sfd = openat (node_dirfd (node), node->path, O_RDONLY);
+  sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
   if (sfd < 0)
     goto exit;
 
-  dfd = openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode);
+  dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode));
   if (dfd < 0)
     goto exit;
 
@@ -1523,7 +1523,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
           size_t c = 0;
           int fd;
 
-          fd = openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY);
+          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
           if (fd < 0)
             {
               fuse_reply_err (req, errno);
@@ -1579,7 +1579,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
     }
 
   sprintf (whiteout_path, "%s/.wh.%s", pnode->path, name);
-  fd = openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700);
+  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700));
   if (fd < 0 && errno != EEXIST)
     {
       fuse_reply_err (req, errno);
@@ -1742,7 +1742,7 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
         return -1;
 
-      fd = openat (get_upper_layer (lo)->fd, path, flags, mode);
+      fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
       if (fd < 0)
         return -1;
 
@@ -1766,7 +1766,7 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   /* readonly, we can use both lowerdir and upperdir.  */
   if (readonly)
     {
-      return openat (node_dirfd (n), n->path, flags, mode);
+      return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
     }
   else
     {
@@ -1774,7 +1774,7 @@ cfs_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (n == NULL)
         return -1;
 
-      return openat (node_dirfd (n), n->path, flags, mode);
+      return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
     }
 }
 
@@ -1952,7 +1952,7 @@ cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   dirfd = node_dirfd (node);
 
-  if (fstatat (dirfd, node->path, &old_st, AT_SYMLINK_NOFOLLOW) < 0)
+  if (TEMP_FAILURE_RETRY (fstatat (dirfd, node->path, &old_st, AT_SYMLINK_NOFOLLOW)) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -1992,7 +1992,7 @@ cfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     }
   if ((to_set & FUSE_SET_ATTR_SIZE))
     {
-      int fd = openat (dirfd, node->path, O_WRONLY);
+      int fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY));
       if (fd < 0)
         {
           fuse_reply_err (req, errno);
@@ -2102,7 +2102,7 @@ cfs_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
     }
   else
     {
-      int dfd = openat (node_dirfd (newparentnode), path, O_WRONLY);
+      int dfd = TEMP_FAILURE_RETRY (openat (node_dirfd (newparentnode), path, O_WRONLY));
       if (dfd >= 0)
         {
           fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
@@ -2273,7 +2273,7 @@ cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (pnode == NULL)
     goto error;
 
-  ret = openat (node_dirfd (pnode), pnode->path, O_DIRECTORY);
+  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (pnode), pnode->path, O_DIRECTORY));
   if (ret < 0)
     goto error;
   srcfd = ret;
@@ -2282,7 +2282,7 @@ cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (destpnode == NULL)
     goto error;
 
-  ret = openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY);
+  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY));
   if (ret < 0)
     goto error;
   destfd = ret;
@@ -2388,7 +2388,7 @@ cfs_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       int fd;
 
       sprintf (path, ".wh.%s", name);
-      fd = openat (srcfd, path, O_CREAT, 0700);
+      fd = TEMP_FAILURE_RETRY (openat (srcfd, path, O_CREAT, 0700));
       if (fd < 0)
         goto error;
       close (fd);
@@ -2487,7 +2487,7 @@ hide_all (struct cfs_data *lo, struct cfs_node *node)
 
       sprintf (b, "%s/.wh.%s", node->path, it->name);
 
-      fd = openat (get_upper_layer (lo)->fd, b, O_CREAT, 0700);
+      fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, b, O_CREAT, 0700));
       if (fd < 0 && errno != EEXIST)
         return fd;
       close (fd);
