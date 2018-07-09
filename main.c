@@ -2105,7 +2105,21 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       int dfd = TEMP_FAILURE_RETRY (openat (node_dirfd (newparentnode), path, O_WRONLY));
       if (dfd >= 0)
         {
-          fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
+          bool set = false;
+          int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
+          if (sfd >= 0)
+            {
+              char redirect_path[PATH_MAX + 10];
+              ssize_t s = fgetxattr (sfd, REDIRECT_XATTR, redirect_path, sizeof (redirect_path));
+              if (s > 0)
+                {
+                  set = fsetxattr (dfd, REDIRECT_XATTR, redirect_path, s, 0) == 0;
+                }
+              close (sfd);
+            }
+
+          if (! set)
+            fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
           close (dfd);
         }
     }
