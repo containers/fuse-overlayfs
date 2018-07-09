@@ -98,7 +98,7 @@ struct lo_node
   char *name;
   int lookups;
   ino_t ino;
-  int rmfrom;
+  int hidden_dirfd;
 
   unsigned int present_lowerdir : 1;
   unsigned int do_unlink : 1;
@@ -260,7 +260,7 @@ static int
 node_dirfd (struct lo_node *n)
 {
   if (n->hidden)
-    return n->rmfrom;
+    return n->hidden_dirfd;
   return n->layer->fd;
 }
 
@@ -313,7 +313,7 @@ hide_node (struct lo_data *lo, struct lo_node *node, bool unlink_src)
           return -1;
         }
     }
-  node->rmfrom = lo->workdir_fd;
+  node->hidden_dirfd = lo->workdir_fd;
   free (node->path);
   node->path = newpath;
   node->hidden = 1;
@@ -429,9 +429,9 @@ node_free (void *p)
     }
 
   if (n->do_unlink)
-    unlinkat (n->rmfrom, n->path, 0);
+    unlinkat (n->hidden_dirfd, n->path, 0);
   if (n->do_rmdir)
-    unlinkat (n->rmfrom, n->path, AT_REMOVEDIR);
+    unlinkat (n->hidden_dirfd, n->path, AT_REMOVEDIR);
 
   free (n->name);
   free (n->path);
@@ -520,7 +520,7 @@ make_lo_node (const char *path, struct lo_layer *layer, const char *name, ino_t 
   ret->ino = ino;
   ret->present_lowerdir = 0;
   ret->name = strdup (name);
-  ret->rmfrom = 0;
+  ret->hidden_dirfd = 0;
   if (ret->name == NULL)
     {
       free (ret);
@@ -1513,7 +1513,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 
   if (node->layer == get_upper_layer (lo))
     {
-      node->rmfrom = node->layer->fd;
+      node->hidden_dirfd = node->layer->fd;
 
       if (! dirp)
         node->do_unlink = 1;
