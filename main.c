@@ -122,8 +122,7 @@ struct lo_data
   int workdir_fd;
   struct lo_layer *layers;
 
-  struct lo_node *root_lower;
-  struct lo_node *root_upper;
+  struct lo_node *root;
 };
 
 static const struct fuse_opt lo_opts[] = {
@@ -793,7 +792,7 @@ do_lookup_file (struct lo_data *lo, fuse_ino_t parent, const char *name)
   struct lo_node *node, *pnode;
 
   if (parent == FUSE_ROOT_ID)
-    pnode = lo->root_upper;
+    pnode = lo->root;
   else
     pnode = (struct lo_node *) parent;
 
@@ -2649,8 +2648,7 @@ main (int argc, char *argv[])
                        .gid_mappings = NULL,
                        .uid_str = NULL,
                        .gid_str = NULL,
-                       .root_lower = NULL,
-                       .root_upper = NULL,
+                       .root = NULL,
                        .lowerdir = NULL,
   };
   int ret = -1;
@@ -2701,8 +2699,6 @@ main (int argc, char *argv[])
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
 
-  lo.root_lower = NULL;
-
   lo.layers = read_dirs (lo.lowerdir, true, NULL);
   if (lo.layers == NULL)
     error (EXIT_FAILURE, errno, "cannot read lower dirs");
@@ -2711,10 +2707,10 @@ main (int argc, char *argv[])
   if (lo.layers == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
 
-  lo.root_upper = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
-  if (lo.root_upper == NULL)
+  lo.root = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
+  if (lo.root == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
-  lo.root_upper->lookups = 2;
+  lo.root->lookups = 2;
 
   if (lo.workdir == NULL)
     error (EXIT_FAILURE, 0, "workdir not specified");
@@ -2752,9 +2748,9 @@ err_out2:
   fuse_session_destroy (se);
 err_out1:
 
-  node_mark_all_free (lo.root_upper);
+  node_mark_all_free (lo.root);
 
-  node_free (lo.root_upper);
+  node_free (lo.root);
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);
