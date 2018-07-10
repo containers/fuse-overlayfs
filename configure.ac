@@ -14,6 +14,8 @@ gl_INIT
 
 AC_CHECK_HEADERS([fcntl.h inttypes.h limits.h stddef.h stdint.h stdlib.h string.h unistd.h])
 
+AC_PROG_RANLIB
+
 AC_CHECK_HEADER_STDBOOL
 AC_TYPE_MODE_T
 AC_FUNC_OBSTACK
