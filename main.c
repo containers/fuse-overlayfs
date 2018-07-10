@@ -1716,6 +1716,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   if (!n)
     {
       struct ovl_node *p;
+      const struct fuse_ctx *ctx = fuse_req_ctx (req);
 
       if ((flags & O_CREAT) == 0)
         {
@@ -1745,6 +1746,13 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
       if (fd < 0)
         return -1;
+
+      if (fchown (fd, ctx->uid, ctx->gid) < 0)
+        {
+          /* FIXME: create the file in the working dir.  */
+          unlinkat (get_upper_layer (lo)->fd, path, 0);
+          return -1;
+        }
 
       n = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
       if (n == NULL)
@@ -2653,6 +2661,13 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
   if (strcmp (arg, "--debug") == 0)
     return 1;
 
+  if (strcmp (arg, "allow_root") == 0)
+    return 1;
+  if (strcmp (arg, "default_permissions") == 0)
+    return 1;
+  if (strcmp (arg, "allow_other") == 0)
+    return 1;
+
   /* Ignore unknown arguments.  */
   if (key == -1)
     return 0;
@@ -2660,12 +2675,25 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
   return 1;
 }
 
+char **
+get_new_args (int *argc, char **argv)
+{
+  int i;
+  char **newargv = malloc (sizeof (char *) * (*argc + 2));
+  newargv[0] = argv[0];
+  newargv[1] = "-odefault_permissions,allow_other";
+  for (i = 1; i < *argc; i++)
+    newargv[i + 1] = argv[i];
+  (*argc)++;
+  return newargv;
+}
+
 int
 main (int argc, char *argv[])
 {
-  struct fuse_args args = FUSE_ARGS_INIT (argc, argv);
   struct fuse_session *se;
   struct fuse_cmdline_opts opts;
+  char **newargv = get_new_args (&argc, argv);
   struct ovl_data lo = {.debug = 0,
                        .uid_mappings = NULL,
                        .gid_mappings = NULL,
@@ -2675,11 +2703,13 @@ main (int argc, char *argv[])
                        .lowerdir = NULL,
   };
   int ret = -1;
+  struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
 
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
     return 1;
   if (fuse_parse_cmdline (&args, &opts) != 0)
     return 1;
+
   if (opts.show_help)
     {
       printf ("usage: %s [options] <mountpoint>\n\n", argv[0]);
