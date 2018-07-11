@@ -1717,6 +1717,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
     {
       struct ovl_node *p;
       const struct fuse_ctx *ctx = fuse_req_ctx (req);
+      char wd_tmp_file_name[32];
 
       if ((flags & O_CREAT) == 0)
         {
@@ -1743,14 +1744,21 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
         return -1;
 
-      fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
+      sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
+      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
       if (fd < 0)
         return -1;
 
       if (fchown (fd, ctx->uid, ctx->gid) < 0)
         {
-          /* FIXME: create the file in the working dir.  */
-          unlinkat (get_upper_layer (lo)->fd, path, 0);
+          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+          return -1;
+        }
+
+      if (renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, path) < 0)
+        {
+          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
           return -1;
         }
 
