@@ -50,6 +50,8 @@
 
 #include <sys/xattr.h>
 
+#include <linux/fs.h>
+
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
@@ -347,12 +349,14 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
       return -1;
     }
 
+  assert (node->layer == get_upper_layer (lo));
+
   /* Might be leftover from a previous run.  */
   unlinkat (lo->workdir_fd, newpath, 0);
 
-  if (unlink_src)
+  if (! unlink_src)
     {
-      if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
+      if (linkat (node_dirfd (node), node->path, lo->workdir_fd, newpath, 0) < 0)
         {
           free (newpath);
           return -1;
@@ -360,10 +364,20 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
     }
   else
     {
-      if (linkat (node_dirfd (node), node->path, lo->workdir_fd, newpath, 0) < 0)
+      /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
+      if (syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
+                   newpath, RENAME_WHITEOUT) < 0)
         {
-          free (newpath);
-          return -1;
+          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
+            {
+              free (newpath);
+              return -1;
+            }
+          if (node->parent)
+            {
+              if (create_whiteout (lo, node->parent, node->name) < 0)
+                return -1;
+            }
         }
     }
   node->hidden_dirfd = lo->workdir_fd;
@@ -1631,6 +1645,16 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
+  /* If the node is still accessible then be sure we,
+     can write to it.  Fix it to be done when a write is
+     really done, not now.  */
+  node = get_node_up (lo, node);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
   key.name = (char *) name;
   rm = hash_delete (pnode->children, &key);
   if (rm)
@@ -1643,13 +1667,6 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
         }
 
       node_free (rm);
-    }
-
-  ret = create_whiteout (lo, pnode, name);
-  if (ret < 0)
-    {
-      fuse_reply_err (req, errno);
-      return;
     }
 
   fuse_reply_err (req, ret);
@@ -2421,19 +2438,32 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               rm = NULL;
             }
 
-          if (rm && hide_node (lo, rm, false) < 0)
-            goto error;
+          if (rm)
+            {
+              /* If the node is still accessible then be sure we
+                 can write to it.  Fix it to be done when a write is
+                 really done, not now.  */
+              rm = get_node_up (lo, rm);
+              if (rm == NULL)
+                {
+                  fuse_reply_err (req, errno);
+                  return;
+                }
+
+              if (hide_node (lo, rm, false) < 0)
+                goto error;
+            }
         }
     }
-
-  ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
-  if (ret < 0)
-    goto error;
 
   if (flags & RENAME_EXCHANGE)
     {
       struct ovl_node *rm1, *rm2;
       char *tmp;
+
+      ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
+      if (ret < 0)
+        goto error;
 
       rm1 = hash_delete (destpnode->children, destnode);
       rm2 = hash_delete (pnode->children, node);
@@ -2465,8 +2495,19 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
     }
   else
     {
-      if (create_whiteout (lo, pnode, name) < 0)
-        goto error;
+      /* Try to create the whiteout atomically, if it fails do the
+         rename+mknod separately.  */
+      ret = syscall (SYS_renameat2, srcfd, name, destfd,
+                     newname, flags|RENAME_WHITEOUT);
+      if (ret < 0)
+        {
+          ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags);
+          if (ret < 0)
+            goto error;
+
+          if (create_whiteout (lo, pnode, name) < 0)
+            goto error;
+        }
 
       hash_delete (pnode->children, node);
 
