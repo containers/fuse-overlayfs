@@ -282,6 +282,21 @@ has_prefix (const char *str, const char *pref)
 }
 
 static int
+create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name)
+{
+  char whiteout_path[PATH_MAX + 10];
+  int fd = -1;
+
+  sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
+  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700));
+  if (fd < 0 && errno != EEXIST)
+    return -1;
+
+  close (fd);
+  return 0;
+}
+
+static int
 hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
@@ -1499,9 +1514,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *pnode;
-  int fd;
   int ret = 0;
-  char whiteout_path[PATH_MAX + 10];
   struct ovl_node key, *rm;
 
   node = do_lookup_file (lo, parent, name);
@@ -1523,7 +1536,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
           size_t c = 0;
           int fd;
 
-          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
+          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY ));
           if (fd < 0)
             {
               fuse_reply_err (req, errno);
@@ -1578,14 +1591,12 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
-  sprintf (whiteout_path, "%s/.wh.%s", pnode->path, name);
-  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700));
-  if (fd < 0 && errno != EEXIST)
+  ret = create_whiteout (lo, pnode, name);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
-  close (fd);
 
   ret = 0;
 
@@ -1697,7 +1708,6 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
   if (name && has_prefix (name, ".wh."))
     {
-
       errno = EINVAL;
       return - 1;
     }
@@ -2415,13 +2425,8 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
     }
   else
     {
-      int fd;
-
-      sprintf (path, ".wh.%s", name);
-      fd = TEMP_FAILURE_RETRY (openat (srcfd, path, O_CREAT, 0700));
-      if (fd < 0)
+      if (create_whiteout (lo, pnode, name) < 0)
         goto error;
-      close (fd);
 
       hash_delete (pnode->children, node);
 
@@ -2508,19 +2513,15 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
 static int
 hide_all (struct ovl_data *lo, struct ovl_node *node)
 {
-  char b[PATH_MAX];
   struct ovl_node *it;
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
-      int fd;
+      int ret;
 
-      sprintf (b, "%s/.wh.%s", node->path, it->name);
-
-      fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, b, O_CREAT, 0700));
-      if (fd < 0 && errno != EEXIST)
-        return fd;
-      close (fd);
+      ret = create_whiteout (lo, node, it->name);
+      if (ret < 0)
+        return ret;
     }
   return 0;
 }
