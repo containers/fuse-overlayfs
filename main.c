@@ -297,6 +297,27 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name)
 }
 
 static int
+delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const char *name)
+{
+  char whiteout_path[PATH_MAX + 10];
+
+  if (dirfd >= 0)
+    {
+      sprintf (whiteout_path, ".wh.%s", name);
+      if (unlinkat (dirfd, whiteout_path, 0) < 0 && errno != ENOENT)
+        return -1;
+    }
+  else
+    {
+      sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
+      if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0 && errno != ENOENT)
+        return -1;
+    }
+
+  return 0;
+}
+
+static int
 hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
   char dest[PATH_MAX];
@@ -1309,11 +1330,7 @@ out:
       src->layer = get_upper_layer (lo);
 
       if (src->parent)
-        {
-          char wh[PATH_MAX];
-          sprintf (wh, "%s/.wh.%s", src->path, src->name);
-          unlinkat (node_dirfd (src), wh, 0);
-        }
+        delete_whiteout (lo, -1, src->parent, src->name);
     }
 
   return ret;
@@ -1746,8 +1763,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (p == NULL)
         return -1;
 
-      sprintf (path, "%s/.wh.%s", p->path, name);
-      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
+      if (delete_whiteout (lo, -1, p, name) < 0)
         return -1;
 
       sprintf (path, "%s/%s", p->path, name);
@@ -2113,8 +2129,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       return;
     }
 
-  sprintf (path, "%s/.wh.%s", newparentnode->path, newname);
-  if (unlinkat (node_dirfd (newparentnode), path, 0) < 0 && errno != ENOENT)
+  if (delete_whiteout (lo, -1, newparentnode, newname) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -2213,8 +2228,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  sprintf (path, "%s/.wh.%s", pnode->path, name);
-  if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
+  if (delete_whiteout (lo, -1, pnode, name) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -2283,7 +2297,6 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_data *lo = ovl_data (req);
   int ret;
   int saved_errno;
-  char path[PATH_MAX + 1];
   int srcfd = -1;
   int destfd = -1;
   struct ovl_node key, *rm = NULL;
@@ -2442,8 +2455,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
         goto error;
     }
 
-  sprintf (path, ".wh.%s", newname);
-  if (unlinkat (destfd, path, 0) < 0 && errno != ENOENT)
+  if (delete_whiteout (lo, destfd, NULL, newname) < 0)
     goto error;
 
  error:
@@ -2534,7 +2546,6 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   struct ovl_node *pnode;
   int ret = 0;
   char path[PATH_MAX + 10];
-  char whiteout_path[PATH_MAX + 16];
   struct fuse_entry_param e;
 
   if (ovl_debug (req))
@@ -2591,9 +2602,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  sprintf (whiteout_path, "%s/.wh.%s", pnode->path, name);
-  ret = unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0);
-  if (ret < 0 && errno != ENOENT)
+  if (delete_whiteout (lo, -1, pnode, name) < 0)
     {
       fuse_reply_err (req, errno);
       return;
