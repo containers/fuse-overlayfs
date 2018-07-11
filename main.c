@@ -852,6 +852,8 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
       for (it = lo->layers; it; it = it->next)
         {
+          const char *wh_name;
+
           sprintf (path, "%s/%s", pnode->path, name);
           ret = TEMP_FAILURE_RETRY (fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0)
@@ -868,7 +870,11 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               return NULL;
             }
 
-          node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR);
+          wh_name = get_whiteout_name (name, &st);
+          if (wh_name)
+            node = make_whiteout_node (wh_name);
+          else
+            node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR);
           if (node == NULL)
             {
               errno = ENOMEM;
