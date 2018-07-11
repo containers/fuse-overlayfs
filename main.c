@@ -286,6 +286,23 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name)
 {
   char whiteout_path[PATH_MAX + 10];
   int fd = -1;
+  static bool can_mknod = true;
+
+  if (can_mknod)
+    {
+      int ret;
+
+      sprintf (whiteout_path, "%s/%s", parent->path, name);
+      ret = mknodat (get_upper_layer (lo)->fd, whiteout_path, S_IFCHR|0700, makedev (0, 0));
+      if (ret == 0)
+        return 0;
+
+      if (errno != EPERM)
+        return -1;
+
+      /* if it fails with EPERM then do not attempt mknod again.  */
+      can_mknod = false;
+    }
 
   sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
   fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700));
@@ -1614,21 +1631,25 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
+  key.name = (char *) name;
+  rm = hash_delete (pnode->children, &key);
+  if (rm)
+    {
+      ret = hide_node (lo, rm, true);
+      if (ret < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+
+      node_free (rm);
+    }
+
   ret = create_whiteout (lo, pnode, name);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
-    }
-
-  ret = 0;
-
-  key.name = (char *) name;
-  rm = hash_delete (pnode->children, &key);
-  if (rm)
-    {
-      hide_node (lo, rm, true);
-      node_free (rm);
     }
 
   fuse_reply_err (req, ret);
