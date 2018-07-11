@@ -1750,7 +1750,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (fd < 0)
         return -1;
 
-      if (fchown (fd, ctx->uid, ctx->gid) < 0)
+      if (fchown (fd, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid)) < 0)
         {
           unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
           return -1;
