@@ -1578,6 +1578,26 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
+  if (dirp)
+    {
+      size_t c;
+
+      /* Re-load the directory.  */
+      node = load_dir (lo, node, node->layer, node->path, node->name);
+      if (node == NULL)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+
+      c = count_dir_entries (node);
+      if (c)
+        {
+          fuse_reply_err (req, ENOTEMPTY);
+          return;
+        }
+    }
+
   if (node->layer == get_upper_layer (lo))
     {
       node->hidden_dirfd = node->layer->fd;
@@ -1587,22 +1607,12 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       else
         {
           DIR *dp;
-          size_t c = 0;
           int fd;
 
-          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY ));
+          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
           if (fd < 0)
             {
               fuse_reply_err (req, errno);
-              return;
-            }
-
-          if (node->children)
-            c = count_dir_entries (node);
-          if (c)
-            {
-              close (fd);
-              fuse_reply_err (req, ENOTEMPTY);
               return;
             }
 
