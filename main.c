@@ -2481,7 +2481,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
             }
 
         }
-      if (destnode != NULL && node_dirp (destnode))
+      if (destnode != NULL && !destnode->whiteout && node_dirp (destnode))
         {
           errno = EISDIR;
           goto error;
@@ -2490,7 +2490,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       rm = hash_lookup (destpnode->children, &key);
       if (rm)
         {
-          if (rm->ino == node->ino)
+          if (!rm->whiteout && rm->ino == node->ino)
             {
               fuse_reply_err (req, 0);
               return;
@@ -2562,6 +2562,8 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
     }
   else
     {
+      unlinkat (destfd, newname, 0);
+
       /* Try to create the whiteout atomically, if it fails do the
          rename+mknod separately.  */
       ret = syscall (SYS_renameat2, srcfd, name, destfd,
