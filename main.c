@@ -2572,12 +2572,21 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       return;
     }
 
-  if (node_dirp (node) && node->present_lowerdir)
+  if (node_dirp (node))
     {
-      fuse_reply_err (req, EXDEV);
-      return;
-    }
+      node = load_dir (lo, node, node->layer, node->path, node->name);
+      if (node == NULL)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
 
+      if (node->layer != get_upper_layer (lo) || node->present_lowerdir)
+        {
+          fuse_reply_err (req, EXDEV);
+          return;
+        }
+    }
   pnode = node->parent;
 
   destpnode = do_lookup_file (lo, newparent, NULL);
