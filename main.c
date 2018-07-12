@@ -1835,7 +1835,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
     {
       n = NULL;
     }
-  if (n && (flags & O_CREAT))
+  if (n && !n->whiteout && (flags & O_CREAT))
     {
       errno = EEXIST;
       return -1;
@@ -2188,13 +2188,6 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
   if (ovl_debug (req))
     fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
 
-  node = do_lookup_file (lo, newparent, newname);
-  if (node != NULL)
-    {
-      fuse_reply_err (req, EEXIST);
-      return;
-    }
-
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
     {
@@ -2217,7 +2210,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
     }
 
   destnode = do_lookup_file (lo, newparent, newname);
-  if (destnode)
+  if (destnode && !destnode->whiteout)
     {
       fuse_reply_err (req, EEXIST);
       return;
@@ -2323,7 +2316,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
     }
 
   node = do_lookup_file (lo, parent, name);
-  if (node != NULL)
+  if (node != NULL && !node->whiteout)
     {
       fuse_reply_err (req, EEXIST);
       return;
@@ -2464,7 +2457,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       if (flags & RENAME_NOREPLACE)
         {
           rm = hash_lookup (destpnode->children, &key);
-          if (rm)
+          if (rm && !rm->whiteout)
             {
               errno = EEXIST;
               goto error;
@@ -2680,7 +2673,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
 	     parent, name, mode, rdev);
 
   node = do_lookup_file (lo, parent, name);
-  if (node != NULL)
+  if (node != NULL && !node->whiteout)
     {
       fuse_reply_err (req, EEXIST);
       return;
@@ -2775,7 +2768,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 	     parent, name, mode);
 
   node = do_lookup_file (lo, parent, name);
-  if (node != NULL)
+  if (node != NULL && !node->whiteout)
     {
       fuse_reply_err (req, EEXIST);
       return;
