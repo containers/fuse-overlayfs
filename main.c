@@ -2191,6 +2191,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
+  char wd_tmp_file_name[32];
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
@@ -2236,8 +2237,17 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       return;
     }
 
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
   sprintf (path, "%s/%s", newparentnode->path, newname);
-  if (linkat (node_dirfd (newparentnode), node->path, node_dirfd (newparentnode), path, 0) < 0)
+
+  if (linkat (node_dirfd (newparentnode), node->path, lo->workdir_fd, wd_tmp_file_name, 0) < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  if (renameat (lo->workdir_fd, wd_tmp_file_name, node_dirfd (newparentnode), path) < 0)
     {
       fuse_reply_err (req, errno);
       return;
