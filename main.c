@@ -1281,33 +1281,20 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
   return 0;
 }
 
+static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
+
 static int
-create_directory (struct ovl_data *lo, struct ovl_node *src)
+create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
+                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode)
 {
   int ret;
-  struct stat st;
-  int sfd = -1, dfd = -1;
+  int dfd = -1;
   char *buf = NULL;
   char wd_tmp_file_name[32];
-  struct timespec times[2];
-
-  if (src == NULL)
-    return 0;
-
-  if (src->layer == get_upper_layer (lo))
-    return 0;
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  ret = sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (src), src->path, O_RDONLY));
-  if (ret < 0)
-    goto out;
-
-  ret = TEMP_FAILURE_RETRY (fstat (sfd, &st));
-  if (ret < 0)
-    return ret;
-
-  ret = mkdirat (lo->workdir_fd, wd_tmp_file_name, st.st_mode);
+  ret = mkdirat (lo->workdir_fd, wd_tmp_file_name, mode);
   if (ret < 0)
     goto out;
 
@@ -1315,17 +1302,18 @@ create_directory (struct ovl_data *lo, struct ovl_node *src)
   if (ret < 0)
     goto out;
 
-  ret = fchown (dfd, st.st_uid, st.st_gid);
+  ret = fchown (dfd, uid, gid);
   if (ret < 0)
     goto out;
 
-  times[0] = st.st_atim;
-  times[1] = st.st_mtim;
-  ret = futimens (dfd, times);
-  if (ret < 0)
-    goto out;
+  if (times)
+    {
+      ret = futimens (dfd, times);
+      if (ret < 0)
+        goto out;
+    }
 
-  if (ret == 0)
+  if (ret == 0 && xattr_sfd >= 0)
     {
       const size_t buf_size = 1 << 20;
       char *buf = malloc (buf_size);
@@ -1335,26 +1323,26 @@ create_directory (struct ovl_data *lo, struct ovl_node *src)
           goto out;
         }
 
-      ret = copy_xattr (sfd, dfd, buf, buf_size);
+      ret = copy_xattr (xattr_sfd, dfd, buf, buf_size);
       if (ret < 0)
         goto out;
     }
 
-  ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, src->path);
+  unlinkat (dirfd, name, 0);
+
+  ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
   if (ret < 0)
     {
-      if (errno == ENOENT && src->parent)
+      if (errno == ENOENT && parent)
         {
-          ret = create_directory (lo, src->parent);
+          ret = create_node_directory (lo, parent);
           if (ret != 0)
             goto out;
         }
 
-      ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, src->path);
+      ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
     }
 out:
-  if (sfd >= 0)
-    close (sfd);
   if (dfd >= 0)
     close (dfd);
   if (buf)
@@ -1362,7 +1350,40 @@ out:
 
   if (ret < 0)
       unlinkat (lo->workdir_fd, wd_tmp_file_name, AT_REMOVEDIR);
-  else
+
+  return ret;
+}
+
+static int
+create_node_directory (struct ovl_data *lo, struct ovl_node *src)
+{
+  int ret;
+  struct stat st;
+  int sfd = -1;
+  struct timespec times[2];
+
+  if (src == NULL)
+    return 0;
+
+  if (src->layer == get_upper_layer (lo))
+    return 0;
+
+  ret = sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (src), src->path, O_RDONLY));
+  if (ret < 0)
+    return ret;
+
+  ret = TEMP_FAILURE_RETRY (fstat (sfd, &st));
+  if (ret < 0)
+    return ret;
+
+  times[0] = st.st_atim;
+  times[1] = st.st_mtim;
+
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode);
+
+  close (sfd);
+
+  if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
 
@@ -1393,7 +1414,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   if (node->parent)
     {
-      ret = create_directory (lo, node->parent);
+      ret = create_node_directory (lo, node->parent);
       if (ret < 0)
         return ret;
 
@@ -1405,7 +1426,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   if ((st.st_mode & S_IFMT) == S_IFDIR)
     {
-      ret = create_directory (lo, node);
+      ret = create_node_directory (lo, node);
       if (ret < 0)
         goto exit;
       goto success;
@@ -2625,6 +2646,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   int ret = 0;
   char path[PATH_MAX + 10];
   struct fuse_entry_param e;
+  const struct fuse_ctx *ctx = fuse_req_ctx (req);
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
@@ -2652,8 +2674,8 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     }
   sprintf (path, "%s/%s", pnode->path, name);
 
-  unlinkat (get_upper_layer (lo)->fd, path, AT_REMOVEDIR);
-  ret = mkdirat (get_upper_layer (lo)->fd, path, mode);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
+                          get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
