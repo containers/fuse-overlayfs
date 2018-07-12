@@ -758,7 +758,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         {
           struct ovl_node key;
           const char *wh;
-          char path[PATH_MAX + 1];
           struct ovl_node *child = NULL;
 
           key.name = dent->d_name;
@@ -774,7 +773,11 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
           child = hash_lookup (n->children, &key);
           if (child)
-            continue;
+            {
+              if (it->low)
+                child->present_lowerdir = 1;
+              continue;
+            }
 
           wh = get_whiteout_name (dent->d_name, &st);
           if (wh)
@@ -790,9 +793,10 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           else
             {
               bool dirp = st.st_mode & S_IFDIR;
+              char node_path[PATH_MAX + 1];
 
-              sprintf (path, "%s/%s", n->path, dent->d_name);
-              child = make_ovl_node (path, it, dent->d_name, 0, dirp);
+              sprintf (node_path, "%s/%s", n->path, dent->d_name);
+              child = make_ovl_node (node_path, it, dent->d_name, 0, dirp);
 
               if (child == NULL)
                 {
@@ -931,6 +935,8 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           if (node)
             {
               node->ino = st.st_ino;
+              if (it->low)
+                node->present_lowerdir = 1;
               continue;
             }
 
@@ -2464,6 +2470,11 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
           errno = ENOENT;
           goto error;
         }
+      if (node_dirp (node) && destnode->present_lowerdir)
+        {
+          fuse_reply_err (req, EXDEV);
+          return;
+        }
       destnode = get_node_up (lo, destnode);
       if (destnode == NULL)
         goto error;
@@ -2490,6 +2501,11 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
       rm = hash_lookup (destpnode->children, &key);
       if (rm)
         {
+          if (node_dirp (node) && rm->present_lowerdir)
+            {
+              fuse_reply_err (req, EXDEV);
+              return;
+            }
           if (!rm->whiteout && rm->ino == node->ino)
             {
               fuse_reply_err (req, 0);
@@ -2662,16 +2678,36 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
 static int
 hide_all (struct ovl_data *lo, struct ovl_node *node)
 {
-  struct ovl_node *it;
+  struct ovl_node **nodes;
+  size_t i, nodes_size;
 
-  for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+  node = load_dir (lo, node, node->layer, node->path, node->name);
+  if (node == NULL)
+    return -1;
+
+  nodes_size = hash_get_n_entries (node->children) + 2;
+  nodes = malloc (sizeof (struct ovl_node *) * nodes_size);
+  if (nodes == NULL)
+    return -1;
+
+  nodes_size = hash_get_entries (node->children, (void **) nodes, nodes_size);
+  for (i = 0; i < nodes_size; i++)
     {
+      struct ovl_node *it;
       int ret;
 
+      it = nodes[i];
       ret = create_whiteout (lo, node, it->name);
+      node_free (it);
+
       if (ret < 0)
-        return ret;
+        {
+          free(nodes);
+          return ret;
+        }
     }
+
+  free (nodes);
   return 0;
 }
 
