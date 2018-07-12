@@ -1108,7 +1108,7 @@ out_errno:
 }
 
 static int
-create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, struct ovl_node *from)
+create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char *from)
 {
   struct ovl_layer *l;
 
@@ -1124,7 +1124,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, struct ovl
       DIR *dp;
       int fd;
 
-      fd = TEMP_FAILURE_RETRY (openat (l->fd, from->path, O_DIRECTORY));
+      fd = TEMP_FAILURE_RETRY (openat (l->fd, from, O_DIRECTORY));
       if (fd < 0)
         {
           if (errno == ENOENT)
@@ -1154,7 +1154,32 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, struct ovl
 
               n = hash_lookup (node->children, &key);
               if (n)
-                continue;
+                {
+                  if (node_dirp (n))
+                    {
+                      char *c;
+                      n = load_dir (lo, n, n->layer, n->path, n->name);
+                      if (n == NULL)
+                        {
+                          closedir (dp);
+                          return -1;
+                        }
+                      if (asprintf (&c, "%s/%s", from, n->name) < 0)
+                        {
+                          closedir (dp);
+                          return -1;
+                        }
+
+                      if (create_missing_whiteouts (lo, n, c) < 0)
+                        {
+                          free (c);
+                          closedir (dp);
+                          return -1;
+                        }
+                      free (c);
+                    }
+                  continue;
+                }
 
               if (create_whiteout (lo, node, dent->d_name) < 0)
                 {
@@ -2609,7 +2634,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               goto error;
             }
 
-          if (create_missing_whiteouts (lo, node, destnode) < 0)
+          if (create_missing_whiteouts (lo, node, destnode->path) < 0)
             {
               fuse_reply_err (req, errno);
               return;
@@ -2623,7 +2648,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
             goto error;
           if (node_dirp (node) && rm->present_lowerdir)
             {
-              if (create_missing_whiteouts (lo, node, rm) < 0)
+              if (create_missing_whiteouts (lo, node, rm->path) < 0)
                 goto error;
             }
 
