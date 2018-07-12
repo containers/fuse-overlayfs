@@ -927,6 +927,13 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               return NULL;
             }
 
+          /* If we already know the node, simply update the ino.  */
+          if (node)
+            {
+              node->ino = st.st_ino;
+              continue;
+            }
+
           wh_name = get_whiteout_name (name, &st);
           if (wh_name)
             node = make_whiteout_node (wh_name);
