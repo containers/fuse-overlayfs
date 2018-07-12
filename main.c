@@ -318,7 +318,33 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name)
 static int
 delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const char *name)
 {
+  struct stat st;
   char whiteout_path[PATH_MAX + 10];
+
+  if (dirfd >= 0)
+    {
+      if (TEMP_FAILURE_RETRY (fstatat (dirfd, name, &st, AT_SYMLINK_NOFOLLOW)) == 0
+          && (st.st_mode & S_IFMT) == S_IFCHR
+          && major (st.st_rdev) == 0
+          && minor (st.st_rdev) == 0)
+        {
+          return unlinkat (dirfd, name, 0);
+        }
+    }
+  else
+    {
+      sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
+
+      if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
+          && (st.st_mode & S_IFMT) == S_IFCHR
+          && major (st.st_rdev) == 0
+          && minor (st.st_rdev) == 0)
+        {
+          return unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0);
+        }
+    }
+
+  /* If the whiteout was not found, try the .wh. alternative used when running as non-root.  */
 
   if (dirfd >= 0)
     {
