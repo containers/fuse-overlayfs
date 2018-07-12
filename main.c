@@ -1742,6 +1742,36 @@ update_paths (struct ovl_node *node)
   return 0;
 }
 
+static int
+empty_dir (struct ovl_data *lo, struct ovl_node *node)
+{
+  DIR *dp;
+  int fd;
+
+  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
+  if (fd < 0)
+    return -1;
+
+  dp = fdopendir (fd);
+  if (dp)
+    {
+      struct dirent *dent;
+
+      while (dp && ((dent = readdir (dp)) != NULL))
+        {
+          if (strcmp (dent->d_name, ".") == 0)
+            continue;
+          if (strcmp (dent->d_name, "..") == 0)
+            continue;
+          if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
+            unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+        }
+
+      closedir (dp);
+    }
+  return 0;
+}
+
 static void
 do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 {
@@ -1786,35 +1816,10 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
         node->do_unlink = 1;
       else
         {
-          DIR *dp;
-          int fd;
-
-          fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
-          if (fd < 0)
+          if (empty_dir (lo, node) < 0)
             {
               fuse_reply_err (req, errno);
               return;
-            }
-
-          if (fd >= 0)
-            {
-              dp = fdopendir (fd);
-              if (dp)
-                {
-                  struct dirent *dent;
-
-                  while (dp && ((dent = readdir (dp)) != NULL))
-                    {
-                      if (strcmp (dent->d_name, ".") == 0)
-                        continue;
-                      if (strcmp (dent->d_name, "..") == 0)
-                        continue;
-                      if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
-                        unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
-                    }
-
-                  closedir (dp);
-                }
             }
 
           node->do_rmdir = 1;
@@ -2627,12 +2632,8 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
               goto error;
             }
 
-          /* We support only the case where the destination is completely empty.  */
-          if (whiteouts)
-            {
-              errno = EXDEV;
-              goto error;
-            }
+          if (whiteouts && empty_dir (lo, destnode) < 0)
+            goto error;
 
           if (create_missing_whiteouts (lo, node, destnode->path) < 0)
             {
