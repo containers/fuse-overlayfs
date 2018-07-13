@@ -61,7 +61,7 @@
 #define ENTRY_TIMEOUT 1000000000.0
 
 #define XATTR_PREFIX "user.fuseoverlayfs"
-#define REDIRECT_XATTR "user.fuseoverlayfs.redirect"
+#define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 
@@ -691,8 +691,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
 
-          /* If a redirect is specified, use it for the next layer lookup.  */
-          s = fgetxattr (fd, REDIRECT_XATTR, path, sizeof (path) - 1);
+          /* If an origin is specified, use it for the next layer lookup.  */
+          s = fgetxattr (fd, ORIGIN_XATTR, path, sizeof (path) - 1);
           if (s > 0)
             path[s] = '\0';
 
@@ -2418,17 +2418,17 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
           int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
           if (sfd >= 0)
             {
-              char redirect_path[PATH_MAX + 10];
-              ssize_t s = fgetxattr (sfd, REDIRECT_XATTR, redirect_path, sizeof (redirect_path));
+              char origin_path[PATH_MAX + 10];
+              ssize_t s = fgetxattr (sfd, ORIGIN_XATTR, origin_path, sizeof (origin_path));
               if (s > 0)
                 {
-                  set = fsetxattr (dfd, REDIRECT_XATTR, redirect_path, s, 0) == 0;
+                  set = fsetxattr (dfd, ORIGIN_XATTR, origin_path, s, 0) == 0;
                 }
               close (sfd);
             }
 
           if (! set)
-            fsetxattr (dfd, REDIRECT_XATTR, node->path, strlen (node->path), 0);
+            fsetxattr (dfd, ORIGIN_XATTR, node->path, strlen (node->path), 0);
           close (dfd);
         }
     }
