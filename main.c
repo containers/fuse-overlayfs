@@ -122,6 +122,7 @@ struct ovl_data
   char *context;
   char *upperdir;
   char *workdir;
+  char *redirect_dir;
   int workdir_fd;
   struct ovl_layer *layers;
 
@@ -129,6 +130,8 @@ struct ovl_data
 };
 
 static const struct fuse_opt ovl_opts[] = {
+  {"redirect_dir=%s",
+   offsetof (struct ovl_data, redirect_dir), 0},
   {"context=%s",
    offsetof (struct ovl_data, context), 0},
   {"lowerdir=%s",
@@ -3176,6 +3179,7 @@ main (int argc, char *argv[])
                        .gid_str = NULL,
                        .root = NULL,
                        .lowerdir = NULL,
+                       .redirect_dir = NULL,
   };
   int ret = -1;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
@@ -3202,6 +3206,9 @@ main (int argc, char *argv[])
     }
 
   lo.debug = opts.debug;
+
+  if (lo.redirect_dir && strcmp (lo.redirect_dir, "off"))
+    error (EXIT_FAILURE, 0, "fuse-overlayfs only supports redirect_dir=off");
 
   if (lo.upperdir == NULL)
     error (EXIT_FAILURE, 0, "upperdir not specified");
