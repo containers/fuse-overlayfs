@@ -8,12 +8,8 @@ URL: https://github.com/giuseppe/fuse-overlayfs
 
 # We always run autogen.sh
 BuildRequires: autoconf automake
-BuildRequires: gcc
-BuildRequires: python
 BuildRequires: git
 BuildRequires: gcc
-BuildRequires: automake
-BuildRequires: autoconf
 BuildRequires: fuse3-devel
 
 %description
