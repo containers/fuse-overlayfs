@@ -60,6 +60,7 @@
 #define ATTR_TIMEOUT 1000000000.0
 #define ENTRY_TIMEOUT 1000000000.0
 
+#define XATTR_PREFIX "user.fuseoverlayfs"
 #define REDIRECT_XATTR "user.fuseoverlayfs.redirect"
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
@@ -1896,6 +1897,12 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   if (ovl_debug (req))
     fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
+
+  if (has_prefix (name, XATTR_PREFIX))
+    {
+      fuse_reply_err (req, EPERM);
+      return;
+    }
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
