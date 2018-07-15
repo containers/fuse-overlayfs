@@ -62,6 +62,8 @@
 
 #define XATTR_PREFIX "user.fuseoverlayfs"
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
+#define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
+#define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 
@@ -96,7 +98,7 @@ struct ovl_node
 {
   struct ovl_node *parent;
   Hash_table *children;
-  struct ovl_layer *layer;
+  struct ovl_layer *layer, *last_layer;
   char *path;
   char *name;
   int lookups;
@@ -291,6 +293,52 @@ has_prefix (const char *str, const char *pref)
       pref++;
     }
   return false;
+}
+
+static int
+set_fd_opaque (int fd)
+{
+  if (fsetxattr (fd, PRIVILEGED_OPAQUE_XATTR, "y", 1, 0) < 0)
+    {
+      if (errno == ENOTSUP)
+        return 0;
+      if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0)
+          return -1;
+    }
+
+  return 0;
+}
+
+static int
+is_directory_opaque (int dirfd, const char *path)
+{
+  int fd;
+  char b[16];
+  ssize_t s;
+  int saved_errno;
+
+  fd = TEMP_FAILURE_RETRY (openat (dirfd, path, 0));
+  if (fd < 0)
+    return -1;
+
+  s = fgetxattr (fd, PRIVILEGED_OPAQUE_XATTR, b, sizeof (b));
+  if (s < 0 && errno == ENODATA)
+    s = fgetxattr (fd, OPAQUE_XATTR, b, sizeof (b));
+
+  saved_errno = errno;
+  close (fd);
+
+  if (s < 0)
+    {
+      if (saved_errno == ENOTSUP || saved_errno == ENODATA)
+        return 0;
+      return -1;
+    }
+
+  if (b[0] == 'y')
+    return 1;
+
+  return 0;
 }
 
 static int
@@ -626,7 +674,7 @@ make_whiteout_node (const char *path, const char *name)
 }
 
 static struct ovl_node *
-make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p)
+make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent)
 {
   struct ovl_node *ret = malloc (sizeof (*ret));
   if (ret == NULL)
@@ -635,7 +683,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       return NULL;
     }
 
-  ret->parent = NULL;
+  ret->last_layer = NULL;
+  ret->parent = parent;
   ret->lookups = 0;
   ret->do_unlink = 0;
   ret->hidden = 0;
@@ -703,6 +752,9 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
             path[s] = '\0';
 
           close (fd);
+
+          if (parent && parent->last_layer == it)
+            break;
         }
     }
 
@@ -768,7 +820,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
   if (!n)
     {
-      n = make_ovl_node (path, layer, name, 0, true);
+      n = make_ovl_node (path, layer, name, 0, true, NULL);
       if (n == NULL)
         return NULL;
     }
@@ -854,8 +906,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
             {
               bool dirp = st.st_mode & S_IFDIR;
 
-              child = make_ovl_node (node_path, it, dent->d_name, 0, dirp);
-
+              child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
               if (child == NULL)
                 {
                   errno = ENOMEM;
@@ -871,6 +922,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
               }
         }
       closedir (dp);
+
+      if (n->last_layer == it)
+        break;
     }
 
   return n;
@@ -1012,18 +1066,35 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           if (wh_name)
             node = make_whiteout_node (path, wh_name);
           else
-            node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR);
+            node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode);
           if (node == NULL)
             {
               errno = ENOMEM;
               return NULL;
             }
+
+          if (st.st_mode & S_IFDIR)
+            {
+              ret = is_directory_opaque (it->fd, path);
+              if (ret < 0)
+                {
+                  node_free (node);
+                  return NULL;
+                }
+              if (ret > 0)
+                node->last_layer = it;
+            }
+
           if (insert_node (pnode, node, false) == NULL)
             {
               node_free (node);
               errno = ENOMEM;
               return NULL;
             }
+          if (node->last_layer)
+            break;
+          if (pnode && pnode->last_layer == it)
+            break;
         }
     }
 
@@ -1818,6 +1889,12 @@ empty_dir (struct ovl_data *lo, struct ovl_node *node)
   if (fd < 0)
     return -1;
 
+  if (set_fd_opaque (fd) < 0)
+    {
+      close (fd);
+      return -1;
+    }
+
   dp = fdopendir (fd);
   if (dp == NULL)
     {
@@ -2134,7 +2211,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
           return -1;
         }
 
-      n = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
+      n = make_ovl_node (path, get_upper_layer (lo), name, 0, false, p);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -2514,7 +2591,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
         }
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), newname, node->ino, false);
+  node = make_ovl_node (path, get_upper_layer (lo), newname, node->ino, false, newparentnode);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -2591,7 +2668,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
+  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false, pnode);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -3115,7 +3192,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false);
+  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false, pnode);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -3196,7 +3273,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, true);
+  node = make_ovl_node (path, get_upper_layer (lo), name, 0, true, pnode);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
