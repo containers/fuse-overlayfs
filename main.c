@@ -2702,7 +2702,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   int saved_errno;
   int srcfd = -1;
   int destfd = -1;
-  struct ovl_node key, *rm = NULL;
+  struct ovl_node key;
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
@@ -2749,22 +2749,17 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
     goto error;
   destfd = ret;
 
-  destnode = do_lookup_file (lo, newparent, newname);
+  key.name = (char *) newname;
+  destnode = hash_lookup (destpnode->children, &key);
 
   node = get_node_up (lo, node);
   if (node == NULL)
     goto error;
 
-  key.name = (char *) newname;
-  if (flags & RENAME_NOREPLACE)
+  if (flags & RENAME_NOREPLACE && destnode && !destnode->whiteout)
     {
-      rm = hash_lookup (destpnode->children, &key);
-      if (rm && !rm->whiteout)
-        {
-          errno = EEXIST;
-          goto error;
-        }
-
+      errno = EEXIST;
+      goto error;
     }
 
   if (destnode != NULL && !destnode->whiteout && node_dirp (destnode))
@@ -2791,39 +2786,38 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
         }
     }
 
-  rm = hash_lookup (destpnode->children, &key);
-  if (rm)
+  if (destnode)
     {
-      if (!rm->whiteout && rm->ino == node->ino)
+      if (!destnode->whiteout && destnode->ino == node->ino)
         goto error;
-      if (node_dirp (node) && rm->present_lowerdir)
+
+      if (node_dirp (node) && destnode->present_lowerdir)
         {
-          if (create_missing_whiteouts (lo, node, rm->path) < 0)
+          if (create_missing_whiteouts (lo, node, destnode->path) < 0)
             goto error;
         }
 
-      hash_delete (destpnode->children, rm);
-      if (rm->lookups > 0)
-        node_free (rm);
+      if (destnode->lookups > 0)
+        node_free (destnode);
       else
         {
-          node_free (rm);
-          rm = NULL;
+          node_free (destnode);
+          destnode = NULL;
         }
 
-      if (rm)
+      if (destnode)
         {
           /* If the node is still accessible then be sure we
              can write to it.  Fix it to be done when a write is
              really done, not now.  */
-          rm = get_node_up (lo, rm);
-          if (rm == NULL)
+          destnode = get_node_up (lo, destnode);
+          if (destnode == NULL)
             {
               fuse_reply_err (req, errno);
               return;
             }
 
-          if (hide_node (lo, rm, false) < 0)
+          if (hide_node (lo, destnode, false) < 0)
             goto error;
         }
     }
