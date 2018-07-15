@@ -294,13 +294,13 @@ has_prefix (const char *str, const char *pref)
 }
 
 static int
-create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name)
+create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod)
 {
   char whiteout_path[PATH_MAX + 10];
   int fd = -1;
   static bool can_mknod = true;
 
-  if (can_mknod)
+  if (!skip_mknod && can_mknod)
     {
       int ret;
 
@@ -338,23 +338,25 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
           && major (st.st_rdev) == 0
           && minor (st.st_rdev) == 0)
         {
-          return unlinkat (dirfd, name, 0);
+          if (unlinkat (dirfd, name, 0) < 0)
+            return -1;
         }
     }
   else
     {
-      sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
+      sprintf (whiteout_path, "%s/%s", parent->path, name);
 
       if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
           && (st.st_mode & S_IFMT) == S_IFCHR
           && major (st.st_rdev) == 0
           && minor (st.st_rdev) == 0)
         {
-          return unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0);
+          if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0)
+            return -1;
         }
     }
 
-  /* If the whiteout was not found, try the .wh. alternative used when running as non-root.  */
+  /* Look for the .wh. alternative as well.  */
 
   if (dirfd >= 0)
     {
@@ -389,27 +391,9 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 
   /* Might be leftover from a previous run.  */
   unlinkat (lo->workdir_fd, newpath, 0);
+  unlinkat (lo->workdir_fd, newpath, AT_REMOVEDIR);
 
-  if (! unlink_src)
-    {
-      if (node_dirp (node))
-        {
-          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
-            {
-              free (newpath);
-              return -1;
-            }
-        }
-      else
-        {
-          if (linkat (node_dirfd (node), node->path, lo->workdir_fd, newpath, 0) < 0)
-            {
-              free (newpath);
-              return -1;
-            }
-        }
-    }
-  else
+  if (unlink_src)
     {
       /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
       if (syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
@@ -422,8 +406,27 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
             }
           if (node->parent)
             {
-              if (create_whiteout (lo, node->parent, node->name) < 0)
+              if (create_whiteout (lo, node->parent, node->name, false) < 0)
                 return -1;
+            }
+        }
+    }
+  else
+    {
+      if (node_dirp (node))
+        {
+          if (mkdirat (lo->workdir_fd, newpath, 0700) < 0)
+            {
+              free (newpath);
+              return -1;
+            }
+        }
+      else
+        {
+          if (linkat (node_dirfd (node), node->path, lo->workdir_fd, newpath, 0) < 0)
+            {
+              free (newpath);
+              return -1;
             }
         }
     }
@@ -761,7 +764,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
   DIR *dp;
   struct dirent *dent;
   struct stat st;
-  struct ovl_layer *it;
+  struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
 
   if (!n)
     {
@@ -804,9 +807,19 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           child = hash_lookup (n->children, &key);
           if (child)
             {
-              if (it->low)
-                child->present_lowerdir = 1;
-              continue;
+              if (child->whiteout && it == upper_layer)
+                {
+                  hash_delete (n->children, child);
+                  node_free (child);
+                  child = NULL;
+                }
+              else
+                {
+                  if (it->low)
+                    child->present_lowerdir = 1;
+                  child->ino = st.st_ino;
+                  continue;
+                }
             }
 
           sprintf (node_path, "%s/%s", n->path, dent->d_name);
@@ -940,6 +953,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       char path[PATH_MAX];
       struct ovl_layer *it;
       struct stat st;
+      struct ovl_layer *upper_layer = get_upper_layer (lo);
 
       for (it = lo->layers; it; it = it->next)
         {
@@ -964,10 +978,19 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           /* If we already know the node, simply update the ino.  */
           if (node)
             {
-              node->ino = st.st_ino;
-              if (it->low)
-                node->present_lowerdir = 1;
-              continue;
+              if (node->whiteout && it == upper_layer)
+                {
+                  hash_delete (pnode->children, node);
+                  node_free (node);
+                  node = NULL;
+                }
+              else
+                {
+                  node->ino = st.st_ino;
+                  if (it->low)
+                    node->present_lowerdir = 1;
+                  continue;
+                }
             }
 
           wh_name = get_whiteout_name (name, &st);
@@ -1185,7 +1208,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                   continue;
                 }
 
-              if (create_whiteout (lo, node, dent->d_name) < 0)
+              if (create_whiteout (lo, node, dent->d_name, false) < 0)
                 {
                   closedir (dp);
                   return -1;
@@ -1573,11 +1596,6 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
       ret = create_node_directory (lo, node->parent);
       if (ret < 0)
         return ret;
-
-      char whpath[PATH_MAX + 10];
-      sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
-      if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
-        goto exit;
     }
 
   if ((st.st_mode & S_IFMT) == S_IFDIR)
@@ -1653,6 +1671,14 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, node->path);
   if (ret < 0)
     goto exit;
+
+  if (node->parent)
+    {
+      char whpath[PATH_MAX + 10];
+      sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
+      if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
+        goto exit;
+    }
 
  success:
   ret = 0;
@@ -2705,7 +2731,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_node key;
 
   node = do_lookup_file (lo, parent, name);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -2762,40 +2788,30 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       goto error;
     }
 
-  if (destnode != NULL && !destnode->whiteout && node_dirp (destnode))
-    {
-      size_t whiteouts = 0;
-
-      destnode = load_dir (lo, destnode, destnode->layer, destnode->path, destnode->name);
-      if (destnode == NULL)
-        goto error;
-
-      if (count_dir_entries (destnode, &whiteouts) > 0)
-        {
-          errno = ENOTEMPTY;
-          goto error;
-        }
-
-      if (whiteouts && empty_dir (lo, destnode) < 0)
-        goto error;
-
-      if (create_missing_whiteouts (lo, node, destnode->path) < 0)
-        {
-          fuse_reply_err (req, errno);
-          return;
-        }
-    }
-
   if (destnode)
     {
+      size_t destnode_whiteouts = 0;
+
       if (!destnode->whiteout && destnode->ino == node->ino)
         goto error;
 
-      if (node_dirp (node) && destnode->present_lowerdir)
+      if (!destnode->whiteout && node_dirp (destnode))
         {
-          if (create_missing_whiteouts (lo, node, destnode->path) < 0)
+          destnode = load_dir (lo, destnode, destnode->layer, destnode->path, destnode->name);
+          if (destnode == NULL)
+            goto error;
+
+          if (count_dir_entries (destnode, &destnode_whiteouts) > 0)
+            {
+              errno = ENOTEMPTY;
+              goto error;
+            }
+          if (destnode_whiteouts && empty_dir (lo, destnode) < 0)
             goto error;
         }
+
+      if (node_dirp (node) && create_missing_whiteouts (lo, node, destnode->path) < 0)
+        goto error;
 
       if (destnode->lookups > 0)
         node_free (destnode);
@@ -2822,7 +2838,16 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
         }
     }
 
-  unlinkat (destfd, newname, 0);
+  /* If the node is a directory we must ensure there is no whiteout at the
+     destination, otherwise the renameat2 will fail.  Create a .wh.$NAME style
+     whiteout file until the renameat2 is completed.  */
+  if (node_dirp (node))
+    {
+      ret = create_whiteout (lo, destpnode, newname, true);
+      if (ret < 0)
+        goto error;
+      unlinkat (destfd, newname, 0);
+    }
 
   /* Try to create the whiteout atomically, if it fails do the
      rename+mknod separately.  */
@@ -2834,10 +2859,13 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       if (ret < 0)
         goto error;
 
-      ret = create_whiteout (lo, pnode, name);
+      ret = create_whiteout (lo, pnode, name, false);
       if (ret < 0)
         goto error;
     }
+
+  if (delete_whiteout (lo, destfd, NULL, newname) < 0)
+    goto error;
 
   hash_delete (pnode->children, node);
 
@@ -2853,9 +2881,6 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (node == NULL)
     goto error;
   if (update_paths (node) < 0)
-    goto error;
-
-  if (delete_whiteout (lo, destfd, NULL, newname) < 0)
     goto error;
 
   ret = 0;
@@ -2964,7 +2989,7 @@ hide_all (struct ovl_data *lo, struct ovl_node *node)
       int ret;
 
       it = nodes[i];
-      ret = create_whiteout (lo, node, it->name);
+      ret = create_whiteout (lo, node, it->name, false);
       node_free (it);
 
       if (ret < 0)
