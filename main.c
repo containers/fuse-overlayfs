@@ -786,12 +786,27 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           continue;
         }
 
-      while (((dent = readdir (dp)) != NULL))
+      for (;;)
         {
           struct ovl_node key;
           const char *wh;
           struct ovl_node *child = NULL;
           char node_path[PATH_MAX + 1];
+
+          errno = 0;
+          dent = readdir (dp);
+          if (dent == NULL)
+            {
+              if (errno)
+                {
+                  int saved_errno = errno;
+                  closedir (dp);
+                  errno = saved_errno;
+                  return NULL;
+                }
+
+              break;
+            }
 
           key.name = dent->d_name;
 
@@ -1163,14 +1178,34 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
         }
 
       dp = fdopendir (fd);
-      if (dp)
+      if (dp == NULL)
+        {
+          close (fd);
+          return -1;
+        }
+      else
         {
           struct dirent *dent;
 
-          while (dp && ((dent = readdir (dp)) != NULL))
+          for (;;)
             {
               struct ovl_node key;
               struct ovl_node *n;
+
+              errno = 0;
+              dent = readdir (dp);
+              if (dent == NULL)
+                {
+                  if (errno)
+                    {
+                      int saved_errno = errno;
+                      closedir (dp);
+                      errno = saved_errno;
+                      return -1;
+                    }
+
+                  break;
+                }
 
               if (strcmp (dent->d_name, ".") == 0)
                 continue;
@@ -1777,28 +1812,45 @@ empty_dir (struct ovl_data *lo, struct ovl_node *node)
 {
   DIR *dp;
   int fd;
+  struct dirent *dent;
 
   fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
   if (fd < 0)
     return -1;
 
   dp = fdopendir (fd);
-  if (dp)
+  if (dp == NULL)
     {
-      struct dirent *dent;
-
-      while (dp && ((dent = readdir (dp)) != NULL))
-        {
-          if (strcmp (dent->d_name, ".") == 0)
-            continue;
-          if (strcmp (dent->d_name, "..") == 0)
-            continue;
-          if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
-            unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
-        }
-
-      closedir (dp);
+      close (fd);
+      return -1;
     }
+
+  for (;;)
+    {
+      errno = 0;
+      dent = readdir (dp);
+      if (dent == NULL)
+        {
+          if (errno)
+            {
+              int saved_errno = errno;
+              closedir (dp);
+              errno = saved_errno;
+              return -1;
+            }
+
+          break;
+        }
+      if (strcmp (dent->d_name, ".") == 0)
+        continue;
+      if (strcmp (dent->d_name, "..") == 0)
+        continue;
+      if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
+        unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+    }
+
+  closedir (dp);
+
   return 0;
 }
 
