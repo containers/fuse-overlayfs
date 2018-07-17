@@ -2883,6 +2883,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   int srcfd = -1;
   int destfd = -1;
   struct ovl_node key;
+  bool destnode_is_whiteout = false;
 
   node = do_lookup_file (lo, parent, name);
   if (node == NULL || node->whiteout)
@@ -2949,6 +2950,8 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       if (!destnode->whiteout && destnode->ino == node->ino)
         goto error;
 
+      destnode_is_whiteout = destnode->whiteout;
+
       if (!destnode->whiteout && node_dirp (destnode))
         {
           destnode = load_dir (lo, destnode, destnode->layer, destnode->path, destnode->name);
@@ -2992,6 +2995,17 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
         }
     }
 
+  /* If the destnode is a whiteout, first attempt to EXCHANGE the source and the destination,
+   so that with one operation we get both the rename and the whiteout created.  */
+  if (destnode_is_whiteout)
+    {
+      ret = syscall (SYS_renameat2, srcfd, name, destfd, newname, flags|RENAME_EXCHANGE);
+      if (ret == 0)
+        goto done;
+
+      /* If it fails for any reason, fallback to the more articulated method.  */
+    }
+
   /* If the node is a directory we must ensure there is no whiteout at the
      destination, otherwise the renameat2 will fail.  Create a .wh.$NAME style
      whiteout file until the renameat2 is completed.  */
@@ -3021,6 +3035,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (delete_whiteout (lo, destfd, NULL, newname) < 0)
     goto error;
 
+ done:
   hash_delete (pnode->children, node);
 
   free (node->name);
