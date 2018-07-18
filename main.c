@@ -946,6 +946,7 @@ static struct ovl_layer *
 read_dirs (char *path, bool low, struct ovl_layer *layers)
 {
   char *buf = NULL, *saveptr = NULL, *it;
+  struct ovl_layer *last;
 
   if (path == NULL)
     return NULL;
@@ -953,6 +954,10 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
   buf = strdup (path);
   if (buf == NULL)
     return NULL;
+
+  last = layers;
+  while (last && last->next)
+    last = last->next;
 
   for (it = strtok_r (path, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
@@ -987,8 +992,24 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
         }
 
       l->low = low;
-      l->next = layers;
-      layers = l;
+      if (low)
+        {
+          if (last == NULL)
+            {
+              last = layers = l;
+              l->next = NULL;
+            }
+          else
+            {
+              last->next = l;
+              last = l;
+            }
+        }
+      else
+        {
+          l->next = layers;
+          layers = l;
+        }
     }
   free (buf);
   return layers;
