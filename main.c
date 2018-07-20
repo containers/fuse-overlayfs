@@ -120,6 +120,7 @@ struct ovl_data
   char *gid_str;
   struct ovl_mapping *uid_mappings;
   struct ovl_mapping *gid_mappings;
+  char *mountpoint;
   char *lowerdir;
   char *context;
   char *upperdir;
@@ -3387,6 +3388,8 @@ static struct fuse_lowlevel_ops ovl_oper =
 static int
 fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
 {
+  struct ovl_data *ovl_data = data;
+
   if (strcmp (arg, "-f") == 0)
     return 1;
   if (strcmp (arg, "--debug") == 0)
@@ -3399,6 +3402,14 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
   if (strcmp (arg, "allow_other") == 0)
     return 1;
 
+  if (key == FUSE_OPT_KEY_NONOPT)
+    {
+      if (ovl_data->mountpoint)
+        free (ovl_data->mountpoint);
+
+      ovl_data->mountpoint = strdup (arg);
+      return 0;
+    }
   /* Ignore unknown arguments.  */
   if (key == -1)
     return 0;
@@ -3426,21 +3437,26 @@ main (int argc, char *argv[])
   struct fuse_cmdline_opts opts;
   char **newargv = get_new_args (&argc, argv);
   struct ovl_data lo = {.debug = 0,
-                       .uid_mappings = NULL,
-                       .gid_mappings = NULL,
-                       .uid_str = NULL,
-                       .gid_str = NULL,
-                       .root = NULL,
-                       .lowerdir = NULL,
-                       .redirect_dir = NULL,
+                        .uid_mappings = NULL,
+                        .gid_mappings = NULL,
+                        .uid_str = NULL,
+                        .gid_str = NULL,
+                        .root = NULL,
+                        .lowerdir = NULL,
+                        .redirect_dir = NULL,
+                        .mountpoint = NULL,
   };
   int ret = -1;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
 
+  memset (&opts, 0, sizeof (opts));
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
     return 1;
   if (fuse_parse_cmdline (&args, &opts) != 0)
     return 1;
+
+  if (opts.mountpoint)
+    free (opts.mountpoint);
 
   if (opts.show_help)
     {
@@ -3482,7 +3498,7 @@ main (int argc, char *argv[])
   printf ("UPPERDIR=%s\n", lo.upperdir);
   printf ("WORKDIR=%s\n", lo.workdir);
   printf ("LOWERDIR=%s\n", lo.lowerdir);
-  printf ("MOUNTPOINT=%s\n", opts.mountpoint);
+  printf ("MOUNTPOINT=%s\n", lo.mountpoint);
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
@@ -3525,7 +3541,7 @@ main (int argc, char *argv[])
     goto err_out1;
   if (fuse_set_signal_handlers (se) != 0)
     goto err_out2;
-  if (fuse_session_mount (se, opts.mountpoint) != 0)
+  if (fuse_session_mount (se, lo.mountpoint) != 0)
     goto err_out3;
   fuse_daemonize (opts.foreground);
   ret = fuse_session_loop (se);
@@ -3546,7 +3562,6 @@ err_out1:
   close (lo.workdir_fd);
 
   free_layers (lo.layers);
-  free (opts.mountpoint);
   fuse_opt_free_args (&args);
 
   return ret ? 1 : 0;
