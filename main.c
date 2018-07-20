@@ -45,7 +45,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <fts.h>
 #include <sys/sysmacros.h>
 
 #include <sys/xattr.h>
