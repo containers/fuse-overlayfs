@@ -56,6 +56,10 @@
 # define RENAME_NOREPLACE (1 << 2)
 #endif
 
+#ifndef RENAME_WHITEOUT
+# define RENAME_WHITEOUT (1 << 2)
+#endif
+
 #define ATTR_TIMEOUT 1000000000.0
 #define ENTRY_TIMEOUT 1000000000.0
 
