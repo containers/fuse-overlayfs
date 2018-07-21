@@ -7,8 +7,8 @@ ACLOCAL_AMFLAGS = -Im4
 EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh
 
 fuse_overlayfs_CFLAGS = -I . -I lib $(FUSE_CFLAGS)
-fuse_overlayfs_LDFLAGS = $(FUSE_LIBS)
-fuse_overlayfs_LDADD = lib/libgnu.a
+fuse_overlayfs_LDFLAGS =
+fuse_overlayfs_LDADD = lib/libgnu.a $(FUSE_LIBS)
 fuse_overlayfs_SOURCES = main.c
 
 WD := $(shell pwd)

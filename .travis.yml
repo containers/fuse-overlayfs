@@ -1,0 +1,28 @@
+language: c
+sudo: required
+dist: trusty
+addons:
+  apt:
+    packages:
+      - automake
+      - autotools-dev
+      - git
+      - make
+      - gcc
+      - pkg-config
+      - wget
+      - xz-utils
+      - python3.5
+      - g++
+before_install:
+  - sudo mkdir -p /lower /upper /mnt
+  - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
+  - (git clone git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
+  - (git clone https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
+  - (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.2.4/fuse-3.2.4.tar.xz; tar xf fuse-3.2.4.tar.xz; cd fuse-3.2.4; mkdir build; cd build; meson .. --prefix /usr && ninja && sudo ninja install)
+script:
+  - ./autogen.sh
+  - ./configure
+  - make -j $(nproc)
+  - sudo make -j install; sudo cp fuse-overlayfs /sbin
+  - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev)

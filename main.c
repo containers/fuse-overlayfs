@@ -45,7 +45,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <fts.h>
 #include <sys/sysmacros.h>
 
 #include <sys/xattr.h>
@@ -55,6 +54,10 @@
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
+#endif
+
+#ifndef RENAME_WHITEOUT
+# define RENAME_WHITEOUT (1 << 2)
 #endif
 
 #define ATTR_TIMEOUT 1000000000.0
