@@ -998,11 +998,9 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
       l->low = low;
       if (low)
         {
+          l->next = NULL;
           if (last == NULL)
-            {
-              last = layers = l;
-              l->next = NULL;
-            }
+            last = layers = l;
           else
             {
               last->next = l;
