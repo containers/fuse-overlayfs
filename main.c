@@ -3469,9 +3469,9 @@ main (int argc, char *argv[])
 
   memset (&opts, 0, sizeof (opts));
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
-    return 1;
+    error (EXIT_FAILURE, 0, "error parsing options");
   if (fuse_parse_cmdline (&args, &opts) != 0)
-    return 1;
+    error (EXIT_FAILURE, 0, "error parsing cmdline");
 
   if (opts.mountpoint)
     free (opts.mountpoint);
@@ -3482,14 +3482,14 @@ main (int argc, char *argv[])
       fuse_cmdline_help ();
       fuse_lowlevel_help ();
       ret = 0;
-      goto err_out1;
+      exit (EXIT_SUCCESS);
     }
   else if (opts.show_version)
     {
       printf ("FUSE library version %s\n", fuse_pkgversion ());
       fuse_lowlevel_version ();
       ret = 0;
-      goto err_out1;
+      exit (EXIT_SUCCESS);
     }
 
   lo.debug = opts.debug;
@@ -3504,11 +3504,11 @@ main (int argc, char *argv[])
       char full_path[PATH_MAX + 1];
 
       if (realpath (lo.upperdir, full_path) < 0)
-        goto err_out1;
+        error (EXIT_FAILURE, errno, "cannot retrieve path for %s", lo.upperdir);
 
       lo.upperdir = strdup (full_path);
       if (lo.upperdir == NULL)
-        goto err_out1;
+        error (EXIT_FAILURE, errno, "cannot allocate memory");
     }
 
   printf ("UID=%s\n", lo.uid_str ? : "unchanged");
@@ -3550,17 +3550,26 @@ main (int argc, char *argv[])
 
       lo.workdir_fd = open (lo.workdir, O_DIRECTORY);
       if (lo.workdir_fd < 0)
-        goto err_out1;
+        error (EXIT_FAILURE, errno, "cannot open workdir");
     }
 
   se = fuse_session_new (&args, &ovl_oper, sizeof (ovl_oper), &lo);
   lo.se = se;
   if (se == NULL)
-    goto err_out1;
+    {
+      error (0, errno, "cannot create FUSE session");
+      goto err_out1;
+    }
   if (fuse_set_signal_handlers (se) != 0)
-    goto err_out2;
+    {
+      error (0, errno, "cannot set signal handler");
+      goto err_out2;
+    }
   if (fuse_session_mount (se, lo.mountpoint) != 0)
-    goto err_out3;
+    {
+      error (0, errno, "cannot mount");
+      goto err_out3;
+    }
   fuse_daemonize (opts.foreground);
   ret = fuse_session_loop (se);
   fuse_session_unmount (se);
