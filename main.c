@@ -63,10 +63,12 @@
 #define ATTR_TIMEOUT 1000000000.0
 #define ENTRY_TIMEOUT 1000000000.0
 
-#define XATTR_PREFIX "user.fuseoverlayfs"
+#define XATTR_PREFIX "user.fuseoverlayfs."
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
+#define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
+#define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 
@@ -152,6 +154,26 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, gid_str), 0},
   FUSE_OPT_END
 };
+
+/* Kernel definitions.  */
+
+typedef unsigned char u8;
+typedef unsigned char uuid_t[16];
+
+/* The type returned by overlay exportfs ops when encoding an ovl_fh handle */
+#define OVL_FILEID	0xfb
+
+/* On-disk and in-memeory format for redirect by file handle */
+struct ovl_fh
+{
+  u8 version;  /* 0 */
+  u8 magic;    /* 0xfb */
+  u8 len;      /* size of this header + size of fid */
+  u8 flags;    /* OVL_FH_FLAG_* */
+  u8 type;     /* fid_type of fid */
+  uuid_t uuid; /* uuid of filesystem */
+  u8 fid[0];   /* file identifier */
+} __packed;
 
 static struct ovl_data *
 ovl_data (fuse_req_t req)
@@ -743,12 +765,47 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_PATH|O_RDONLY));
+          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY));
           if (fd < 0)
             continue;
 
           if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
+
+          s = fgetxattr (fd, PRIVILEGED_ORIGIN_XATTR, path, sizeof (path) - 1);
+          if (s > 0)
+            {
+              char buf[512];
+              struct ovl_fh *ofh = (struct ovl_fh *) path;
+              size_t s = ofh->len - sizeof (*ofh);
+              struct file_handle *fh = (struct file_handle *) buf;
+
+              if (s < sizeof (buf) - sizeof(int) * 2)
+                {
+                  int originfd;
+
+                  /*
+                    overlay in the kernel stores a file handle in the .origin xattr.
+                    Honor it when present, but don't fail on errors as an unprivileged
+                    user cannot open a file handle.
+                  */
+                  fh->handle_bytes = s;
+                  fh->handle_type = ofh->type;
+                  memcpy (fh->f_handle, ofh->fid, s);
+
+                  originfd = open_by_handle_at (AT_FDCWD, fh, O_RDONLY);
+                  if (originfd >= 0)
+                    {
+                      if (fstat (originfd, &st) == 0)
+                        {
+                          ret->ino = st.st_ino;
+                          close (originfd);
+                          close (fd);
+                          break;
+                        }
+                    }
+                }
+            }
 
           /* If an origin is specified, use it for the next layer lookup.  */
           s = fgetxattr (fd, ORIGIN_XATTR, path, sizeof (path) - 1);
@@ -888,7 +945,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 {
                   if (it->low)
                     child->present_lowerdir = 1;
-                  child->ino = st.st_ino;
                   continue;
                 }
             }
@@ -998,11 +1054,9 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
       l->low = low;
       if (low)
         {
+          l->next = NULL;
           if (last == NULL)
-            {
-              last = layers = l;
-              l->next = NULL;
-            }
+            last = layers = l;
           else
             {
               last->next = l;
@@ -1366,7 +1420,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
       return;
     }
   p = buffer;
-  for (;remaining > 0 && offset < d->tbl_size; offset++)
+  for (; remaining > 0 && offset < d->tbl_size; offset++)
       {
         int ret;
         size_t entsize;
@@ -1404,7 +1458,6 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             memcpy (&e.attr, &st, sizeof (st));
 
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
-
             if (entsize <= remaining)
               {
                 /* First two entries are . and .. */
@@ -2081,7 +2134,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
     fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
 
-  if (has_prefix (name, XATTR_PREFIX))
+  if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX))
     {
       fuse_reply_err (req, EPERM);
       return;
@@ -2602,11 +2655,16 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
           if (sfd >= 0)
             {
               char origin_path[PATH_MAX + 10];
-              ssize_t s = fgetxattr (sfd, ORIGIN_XATTR, origin_path, sizeof (origin_path));
+              size_t s;
+
+              s = fgetxattr (sfd, PRIVILEGED_ORIGIN_XATTR, origin_path, sizeof (origin_path));
               if (s > 0)
-                {
-                  set = fsetxattr (dfd, ORIGIN_XATTR, origin_path, s, 0) == 0;
-                }
+                fsetxattr (dfd, PRIVILEGED_ORIGIN_XATTR, origin_path, s, 0);
+
+              s = fgetxattr (sfd, ORIGIN_XATTR, origin_path, sizeof (origin_path));
+              if (s > 0)
+                set = fsetxattr (dfd, ORIGIN_XATTR, origin_path, s, 0) == 0;
+
               close (sfd);
             }
 
