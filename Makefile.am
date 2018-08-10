@@ -13,6 +13,11 @@ fuse_overlayfs_SOURCES = main.c
 
 WD := $(shell pwd)
 
+man1_MANS = fuse-overlayfs.1
+
+generate-man:
+	go-md2man -in fuse-overlayfs.1.md -out fuse-overlayfs.1
+
 fuse-overlayfs.spec: $(srcdir)/rpm/fuse-overlayfs.spec.template
 	sed -e 's|#VERSION#|$(VERSION)|g' < $< > $@
 

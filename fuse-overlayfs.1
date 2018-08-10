@@ -1,0 +1,50 @@
+.TH fuse\-overlayfs 1 "User Commands"
+
+.SH NAME
+.PP
+fuse\-overlayfs \- overlayfs FUSE implementation
+
+
+.SH SYNOPSIS
+.PP
+mounting
+    fuse\-overlayfs [\-f] [\-\-debug] [\-o OPTS] MOUNT\_TARGET
+
+.PP
+unmounting
+    fusermount \-u mountpoint
+
+
+.SH DESCRIPTION
+.PP
+fuse\-overlayfs provides an overlayfs FUSE implementation so that it
+can be used since Linux 4.18 by unprivileged users in an user
+namespace.
+
+
+.SH OPTIONS
+.PP
+\fB\-o lowerdir=low1[:low2...]\fP
+A list of directories separated by \fB\fC:\fR\&.  Their content is merged.
+
+.PP
+\fB\-o upperdir=upperdir\fP
+A directory merged on top of all the lowerdirs where all the changes
+done to the file system will be written.
+
+.PP
+\fB\-o workdir=workdir\fP
+A directory used internally by fuse\-overlays, must be on the same file
+system as the upper dir.
+
+
+.SH SEE ALSO
+.PP
+\fBfuse\fP(8), \fBmount\fP(8)
+
+
+.SH AVAILABILITY
+.PP
+The slirp4netns command is available from
+\fB
+\[la]https://github.com/containers/fuse-overlayfs\[ra]\fP under GNU GENERAL PUBLIC LICENSE Version 3 or later.
