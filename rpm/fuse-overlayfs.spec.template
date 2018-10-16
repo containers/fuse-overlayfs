@@ -11,6 +11,7 @@ BuildRequires: autoconf automake
 BuildRequires: git
 BuildRequires: gcc
 BuildRequires: fuse3-devel
+Requires: fuse3
 
 %description
 fuse-overlayfs is a FUSE overlayfs implementation.
