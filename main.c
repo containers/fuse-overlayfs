@@ -383,7 +383,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       if (ret == 0)
         return 0;
 
-      if (errno != EPERM)
+      if (errno != EPERM && errno != ENOTSUP)
         return -1;
 
       /* if it fails with EPERM then do not attempt mknod again.  */
