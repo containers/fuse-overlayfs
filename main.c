@@ -343,7 +343,7 @@ is_directory_opaque (int dirfd, const char *path)
   ssize_t s;
   int saved_errno;
 
-  fd = TEMP_FAILURE_RETRY (openat (dirfd, path, 0));
+  fd = TEMP_FAILURE_RETRY (openat (dirfd, path, O_NONBLOCK));
   if (fd < 0)
     return -1;
 
@@ -391,7 +391,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
     }
 
   sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
-  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY, 0700));
+  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
   if (fd < 0 && errno != EEXIST)
     return -1;
 
@@ -765,7 +765,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY));
+          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK));
           if (fd < 0)
             continue;
 
@@ -1537,7 +1537,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
         }
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
   if (fd < 0)
     {
       free (buf);
@@ -1586,7 +1586,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
         }
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
   if (fd < 0)
     {
       free (buf);
@@ -1731,7 +1731,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   if (src->layer == get_upper_layer (lo))
     return 0;
 
-  ret = sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (src), src->path, O_RDONLY));
+  ret = sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (src), src->path, O_RDONLY|O_NONBLOCK));
   if (ret < 0)
     return ret;
 
@@ -1803,7 +1803,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
       goto success;
     }
 
-  sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
+  sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
   if (sfd < 0)
     goto exit;
 
@@ -2154,7 +2154,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, 0));
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK));
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -2195,7 +2195,7 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       return;
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, 0));
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK));
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -2535,7 +2535,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     }
   if ((to_set & FUSE_SET_ATTR_SIZE))
     {
-      int fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY));
+      int fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY|O_NONBLOCK));
       if (fd < 0)
         {
           fuse_reply_err (req, errno);
@@ -2647,11 +2647,11 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
     }
   else
     {
-      int dfd = TEMP_FAILURE_RETRY (openat (node_dirfd (newparentnode), path, O_WRONLY));
+      int dfd = TEMP_FAILURE_RETRY (openat (node_dirfd (newparentnode), path, O_WRONLY|O_NONBLOCK));
       if (dfd >= 0)
         {
           bool set = false;
-          int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY));
+          int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
           if (sfd >= 0)
             {
               char origin_path[PATH_MAX + 10];
