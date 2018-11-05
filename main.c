@@ -765,13 +765,18 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK));
+          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_PATH));
           if (fd < 0)
             continue;
 
           if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
 
+          close (fd);
+
+          fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
+          if (fd < 0)
+            continue;
           s = fgetxattr (fd, PRIVILEGED_ORIGIN_XATTR, path, sizeof (path) - 1);
           if (s > 0)
             {
