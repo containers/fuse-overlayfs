@@ -1104,6 +1104,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     {
       int ret;
       char path[PATH_MAX];
+      char whpath[PATH_MAX];
       struct ovl_layer *it;
       struct stat st;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
@@ -1146,11 +1147,20 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                 }
             }
 
-          wh_name = get_whiteout_name (name, &st);
-          if (wh_name)
-            node = make_whiteout_node (path, wh_name);
+          sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
+            return NULL;
+          if (ret == 0)
+              node = make_whiteout_node (path, name);
           else
-            node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode);
+            {
+              wh_name = get_whiteout_name (name, &st);
+              if (wh_name)
+                node = make_whiteout_node (path, wh_name);
+              else
+                node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode);
+            }
           if (node == NULL)
             {
               errno = ENOMEM;
