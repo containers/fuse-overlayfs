@@ -2512,6 +2512,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       return;
     }
 
+  memset (times, 0, sizeof (times));
   times[0].tv_sec = UTIME_OMIT;
   times[1].tv_sec = UTIME_OMIT;
   if (to_set & FUSE_SET_ATTR_ATIME)
