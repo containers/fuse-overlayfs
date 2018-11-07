@@ -1129,7 +1129,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       char path[PATH_MAX];
       char whpath[PATH_MAX];
       struct ovl_layer *it;
-      struct stat st;
+      struct stat st, tmp_st;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
 
       for (it = lo->layers; it; it = it->next)
@@ -1143,7 +1143,23 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               int saved_errno = errno;
 
               if (errno == ENOENT)
-                continue;
+                {
+                  sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+                  ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
+                  if (ret < 0 && errno != ENOENT)
+                    return NULL;
+                  if (ret == 0)
+                    {
+                      node = make_whiteout_node (path, name);
+                      if (node == NULL)
+                        {
+                          errno = ENOMEM;
+                          return NULL;
+                        }
+                      goto insert_node;
+                    }
+                  continue;
+                }
 
               if (node)
                 node_free (node);
@@ -1171,7 +1187,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
             }
 
           sprintf (whpath, "%s/.wh.%s", pnode->path, name);
-          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &st, AT_SYMLINK_NOFOLLOW));
+          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0 && errno != ENOENT)
             return NULL;
           if (ret == 0)
@@ -1201,7 +1217,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               if (ret > 0)
                 node->last_layer = it;
             }
-
+insert_node:
           if (insert_node (pnode, node, false) == NULL)
             {
               node_free (node);
