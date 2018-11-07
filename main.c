@@ -765,13 +765,18 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK));
+          int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_PATH));
           if (fd < 0)
             continue;
 
           if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
 
+          close (fd);
+
+          fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
+          if (fd < 0)
+            continue;
           s = fgetxattr (fd, PRIVILEGED_ORIGIN_XATTR, path, sizeof (path) - 1);
           if (s > 0)
             {
@@ -1099,6 +1104,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     {
       int ret;
       char path[PATH_MAX];
+      char whpath[PATH_MAX];
       struct ovl_layer *it;
       struct stat st;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
@@ -1141,11 +1147,20 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                 }
             }
 
-          wh_name = get_whiteout_name (name, &st);
-          if (wh_name)
-            node = make_whiteout_node (path, wh_name);
+          sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
+            return NULL;
+          if (ret == 0)
+              node = make_whiteout_node (path, name);
           else
-            node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode);
+            {
+              wh_name = get_whiteout_name (name, &st);
+              if (wh_name)
+                node = make_whiteout_node (path, wh_name);
+              else
+                node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode);
+            }
           if (node == NULL)
             {
               errno = ENOMEM;
@@ -2507,6 +2522,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       return;
     }
 
+  memset (times, 0, sizeof (times));
   times[0].tv_sec = UTIME_OMIT;
   times[1].tv_sec = UTIME_OMIT;
   if (to_set & FUSE_SET_ATTR_ATIME)
