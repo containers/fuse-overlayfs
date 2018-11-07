@@ -27,3 +27,4 @@ script:
   - make -j $(nproc)
   - sudo make -j install; sudo cp fuse-overlayfs /sbin
   - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev)
+  - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev)

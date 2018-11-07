@@ -83,6 +83,8 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
+static bool disable_ovl_whiteout;
+
 struct ovl_layer
 {
   struct ovl_layer *next;
@@ -374,7 +376,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
   int fd = -1;
   static bool can_mknod = true;
 
-  if (!skip_mknod && can_mknod)
+  if (!disable_ovl_whiteout && !skip_mknod && can_mknod)
     {
       int ret;
 
@@ -881,7 +883,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 {
   DIR *dp;
   struct dirent *dent;
-  struct stat st;
+  struct stat st, tmp_st;
   struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
 
   if (!n)
@@ -906,6 +908,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
       for (;;)
         {
+          int ret;
           struct ovl_node key;
           const char *wh;
           struct ovl_node *child = NULL;
@@ -954,12 +957,18 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
+          sprintf (node_path, ".wh.%s", dent->d_name);
+          ret = TEMP_FAILURE_RETRY (fstatat (fd, node_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
+            {
+              closedir (dp);
+              return NULL;
+            }
           sprintf (node_path, "%s/%s", n->path, dent->d_name);
 
-          wh = get_whiteout_name (dent->d_name, &st);
-          if (wh)
+          if (ret == 0)
             {
-              child = make_whiteout_node (node_path, wh);
+              child = make_whiteout_node (node_path, dent->d_name);
               if (child == NULL)
                 {
                   errno = ENOMEM;
@@ -969,14 +978,28 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
             }
           else
             {
-              bool dirp = st.st_mode & S_IFDIR;
-
-              child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
-              if (child == NULL)
+              wh = get_whiteout_name (dent->d_name, &st);
+              if (wh)
                 {
-                  errno = ENOMEM;
-                  closedir (dp);
-                  return NULL;
+                  child = make_whiteout_node (node_path, wh);
+                  if (child == NULL)
+                    {
+                      errno = ENOMEM;
+                      closedir (dp);
+                      return NULL;
+                    }
+                }
+              else
+                {
+                  bool dirp = st.st_mode & S_IFDIR;
+
+                  child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
+                  if (child == NULL)
+                    {
+                      errno = ENOMEM;
+                      closedir (dp);
+                      return NULL;
+                    }
                 }
             }
 
@@ -1106,7 +1129,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       char path[PATH_MAX];
       char whpath[PATH_MAX];
       struct ovl_layer *it;
-      struct stat st;
+      struct stat st, tmp_st;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
 
       for (it = lo->layers; it; it = it->next)
@@ -1120,7 +1143,23 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               int saved_errno = errno;
 
               if (errno == ENOENT)
-                continue;
+                {
+                  sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+                  ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
+                  if (ret < 0 && errno != ENOENT)
+                    return NULL;
+                  if (ret == 0)
+                    {
+                      node = make_whiteout_node (path, name);
+                      if (node == NULL)
+                        {
+                          errno = ENOMEM;
+                          return NULL;
+                        }
+                      goto insert_node;
+                    }
+                  continue;
+                }
 
               if (node)
                 node_free (node);
@@ -1148,7 +1187,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
             }
 
           sprintf (whpath, "%s/.wh.%s", pnode->path, name);
-          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &st, AT_SYMLINK_NOFOLLOW));
+          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0 && errno != ENOENT)
             return NULL;
           if (ret == 0)
@@ -1178,7 +1217,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               if (ret > 0)
                 node->last_layer = it;
             }
-
+insert_node:
           if (insert_node (pnode, node, false) == NULL)
             {
               node_free (node);
@@ -3540,6 +3579,9 @@ main (int argc, char *argv[])
   };
   int ret = -1;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
+
+  if (getenv ("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT"))
+    disable_ovl_whiteout = true;
 
   memset (&opts, 0, sizeof (opts));
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
