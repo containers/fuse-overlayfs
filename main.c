@@ -883,7 +883,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 {
   DIR *dp;
   struct dirent *dent;
-  struct stat st;
+  struct stat st, tmp_st;
   struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
 
   if (!n)
@@ -908,6 +908,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
       for (;;)
         {
+          int ret;
           struct ovl_node key;
           const char *wh;
           struct ovl_node *child = NULL;
@@ -956,12 +957,18 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
+          sprintf (node_path, ".wh.%s", dent->d_name);
+          ret = TEMP_FAILURE_RETRY (fstatat (fd, node_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
+            {
+              closedir (dp);
+              return NULL;
+            }
           sprintf (node_path, "%s/%s", n->path, dent->d_name);
 
-          wh = get_whiteout_name (dent->d_name, &st);
-          if (wh)
+          if (ret == 0)
             {
-              child = make_whiteout_node (node_path, wh);
+              child = make_whiteout_node (node_path, dent->d_name);
               if (child == NULL)
                 {
                   errno = ENOMEM;
@@ -971,14 +978,28 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
             }
           else
             {
-              bool dirp = st.st_mode & S_IFDIR;
-
-              child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
-              if (child == NULL)
+              wh = get_whiteout_name (dent->d_name, &st);
+              if (wh)
                 {
-                  errno = ENOMEM;
-                  closedir (dp);
-                  return NULL;
+                  child = make_whiteout_node (node_path, wh);
+                  if (child == NULL)
+                    {
+                      errno = ENOMEM;
+                      closedir (dp);
+                      return NULL;
+                    }
+                }
+              else
+                {
+                  bool dirp = st.st_mode & S_IFDIR;
+
+                  child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
+                  if (child == NULL)
+                    {
+                      errno = ENOMEM;
+                      closedir (dp);
+                      return NULL;
+                    }
                 }
             }
 
