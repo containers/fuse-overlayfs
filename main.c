@@ -83,6 +83,8 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
+static bool disable_ovl_whiteout;
+
 struct ovl_layer
 {
   struct ovl_layer *next;
@@ -374,7 +376,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
   int fd = -1;
   static bool can_mknod = true;
 
-  if (!skip_mknod && can_mknod)
+  if (!disable_ovl_whiteout && !skip_mknod && can_mknod)
     {
       int ret;
 
@@ -3540,6 +3542,9 @@ main (int argc, char *argv[])
   };
   int ret = -1;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
+
+  if (getenv ("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT"))
+    disable_ovl_whiteout = true;
 
   memset (&opts, 0, sizeof (opts));
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
