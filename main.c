@@ -3523,6 +3523,14 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
 
   if (strcmp (arg, "-f") == 0)
     return 1;
+  if (strcmp (arg, "--help") == 0)
+    return 1;
+  if (strcmp (arg, "-h") == 0)
+    return 1;
+  if (strcmp (arg, "--version") == 0)
+    return 1;
+  if (strcmp (arg, "-V") == 0)
+    return 1;
   if (strcmp (arg, "--debug") == 0)
     return 1;
 
@@ -3602,6 +3610,7 @@ main (int argc, char *argv[])
     }
   else if (opts.show_version)
     {
+      printf ("fuse-overlayfs: version %s\n", PACKAGE_VERSION);
       printf ("FUSE library version %s\n", fuse_pkgversion ());
       fuse_lowlevel_version ();
       ret = 0;
