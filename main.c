@@ -3523,6 +3523,14 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
 
   if (strcmp (arg, "-f") == 0)
     return 1;
+  if (strcmp (arg, "--help") == 0)
+    return 1;
+  if (strcmp (arg, "-h") == 0)
+    return 1;
+  if (strcmp (arg, "--version") == 0)
+    return 1;
+  if (strcmp (arg, "-V") == 0)
+    return 1;
   if (strcmp (arg, "--debug") == 0)
     return 1;
 
