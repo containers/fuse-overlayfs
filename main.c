@@ -3610,6 +3610,7 @@ main (int argc, char *argv[])
     }
   else if (opts.show_version)
     {
+      printf ("fuse-overlayfs: version %s\n", PACKAGE_VERSION);
       printf ("FUSE library version %s\n", fuse_pkgversion ());
       fuse_lowlevel_version ();
       ret = 0;
