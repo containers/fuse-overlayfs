@@ -3678,6 +3678,8 @@ main (int argc, char *argv[])
         error (EXIT_FAILURE, errno, "cannot open workdir");
     }
 
+  umask (0);
+
   se = fuse_session_new (&args, &ovl_oper, sizeof (ovl_oper), &lo);
   lo.se = se;
   if (se == NULL)
