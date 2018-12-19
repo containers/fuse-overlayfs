@@ -3154,10 +3154,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   free (node->name);
   node->name = strdup (newname);
   if (node->name == NULL)
-    {
-      ret = -1;
-      goto error;
-    }
+    goto error;
 
   node = insert_node (destpnode, node, true);
   if (node == NULL)
@@ -3605,7 +3602,6 @@ main (int argc, char *argv[])
       printf ("usage: %s [options] <mountpoint>\n\n", argv[0]);
       fuse_cmdline_help ();
       fuse_lowlevel_help ();
-      ret = 0;
       exit (EXIT_SUCCESS);
     }
   else if (opts.show_version)
@@ -3613,7 +3609,6 @@ main (int argc, char *argv[])
       printf ("fuse-overlayfs: version %s\n", PACKAGE_VERSION);
       printf ("FUSE library version %s\n", fuse_pkgversion ());
       fuse_lowlevel_version ();
-      ret = 0;
       exit (EXIT_SUCCESS);
     }
 
