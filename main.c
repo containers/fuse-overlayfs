@@ -3537,6 +3537,8 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "allow_other") == 0)
     return 1;
+  if (strcmp (arg, "suid") == 0)
+    return 1;
 
   if (key == FUSE_OPT_KEY_NONOPT)
     {
@@ -3559,7 +3561,10 @@ get_new_args (int *argc, char **argv)
   int i;
   char **newargv = malloc (sizeof (char *) * (*argc + 2));
   newargv[0] = argv[0];
-  newargv[1] = "-odefault_permissions,allow_other";
+  if (geteuid() == 0)
+      newargv[1] = "-odefault_permissions,allow_other,suid";
+  else
+      newargv[1] = "-odefault_permissions,allow_other";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
