@@ -52,6 +52,9 @@
 
 #include <linux/fs.h>
 
+#include <sys/time.h>
+#include <sys/resource.h>
+
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
@@ -3572,6 +3575,21 @@ get_new_args (int *argc, char **argv)
   return newargv;
 }
 
+static void
+set_limits ()
+{
+  struct rlimit l;
+
+  if (getrlimit (RLIMIT_NOFILE, &l) < 0)
+    error (EXIT_FAILURE, errno, "cannot read process rlimit");
+
+  /* Set the soft limit to the hard limit.  */
+  l.rlim_cur = l.rlim_max;
+
+  if (setrlimit (RLIMIT_NOFILE, &l) < 0)
+    error (EXIT_FAILURE, errno, "cannot set process rlimit");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -3636,6 +3654,8 @@ main (int argc, char *argv[])
       if (lo.upperdir == NULL)
         error (EXIT_FAILURE, errno, "cannot allocate memory");
     }
+
+  set_limits ();
 
   fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
   fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
