@@ -1,6 +1,7 @@
 /* fuse-overlayfs: Overlay Filesystem in Userspace
 
    Copyright (C) 2018 Giuseppe Scrivano <giuseppe@scrivano.org>
+   Copyright (C) 2018-2019 Red Hat Inc.
    Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
    This program is free software: you can redistribute it and/or modify
@@ -50,6 +51,9 @@
 #include <sys/xattr.h>
 
 #include <linux/fs.h>
+
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
@@ -3571,6 +3575,21 @@ get_new_args (int *argc, char **argv)
   return newargv;
 }
 
+static void
+set_limits ()
+{
+  struct rlimit l;
+
+  if (getrlimit (RLIMIT_NOFILE, &l) < 0)
+    error (EXIT_FAILURE, errno, "cannot read process rlimit");
+
+  /* Set the soft limit to the hard limit.  */
+  l.rlim_cur = l.rlim_max;
+
+  if (setrlimit (RLIMIT_NOFILE, &l) < 0)
+    error (EXIT_FAILURE, errno, "cannot set process rlimit");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -3636,12 +3655,14 @@ main (int argc, char *argv[])
         error (EXIT_FAILURE, errno, "cannot allocate memory");
     }
 
-  printf ("UID=%s\n", lo.uid_str ? : "unchanged");
-  printf ("GID=%s\n", lo.gid_str ? : "unchanged");
-  printf ("UPPERDIR=%s\n", lo.upperdir);
-  printf ("WORKDIR=%s\n", lo.workdir);
-  printf ("LOWERDIR=%s\n", lo.lowerdir);
-  printf ("MOUNTPOINT=%s\n", lo.mountpoint);
+  set_limits ();
+
+  fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
+  fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
+  fprintf (stderr, "upperdir=%s\n", lo.upperdir);
+  fprintf (stderr, "workdir=%s\n", lo.workdir);
+  fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
+  fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
