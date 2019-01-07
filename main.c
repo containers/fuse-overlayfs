@@ -2279,6 +2279,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   bool readonly = (flags & (O_APPEND | O_RDWR | O_WRONLY | O_CREAT | O_TRUNC)) == 0;
   char path[PATH_MAX + 10];
   int fd;
+  const struct fuse_ctx *ctx = fuse_req_ctx (req);
 
   flags |= O_NOFOLLOW;
 
@@ -2331,7 +2332,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
+      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode  & ~ctx->umask));
       if (fd < 0)
         return -1;
 
