@@ -2332,7 +2332,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode  & ~ctx->umask));
+      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode & ~ctx->umask));
       if (fd < 0)
         return -1;
 
@@ -3344,7 +3344,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
-  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode, rdev);
+  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode & ~ctx->umask, rdev);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
