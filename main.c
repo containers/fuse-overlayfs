@@ -2771,6 +2771,8 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
   char path[PATH_MAX + 10];
   int ret;
   struct fuse_entry_param e;
+  const struct fuse_ctx *ctx = fuse_req_ctx (req);
+  char wd_tmp_file_name[32];
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
@@ -2796,14 +2798,32 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  if (delete_whiteout (lo, -1, pnode, name) < 0)
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
+  unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+  ret = symlinkat (link, lo->workdir_fd, wd_tmp_file_name);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
+  if (fchownat (lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), AT_SYMLINK_NOFOLLOW) < 0)
+    {
+      unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  if (delete_whiteout (lo, -1, pnode, name) < 0)
+    {
+      unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+      fuse_reply_err (req, errno);
+      return;
+    }
+
   sprintf (path, "%s/%s", pnode->path, name);
-  ret = symlinkat (link, get_upper_layer (lo)->fd, path);
+  ret = renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, path);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
