@@ -3441,7 +3441,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   sprintf (path, "%s/%s", pnode->path, name);
 
   ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
-                          get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode);
+                          get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
