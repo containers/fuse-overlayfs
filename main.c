@@ -3589,7 +3589,7 @@ get_new_args (int *argc, char **argv)
   if (geteuid() == 0)
       newargv[1] = "-odefault_permissions,allow_other,suid";
   else
-      newargv[1] = "-odefault_permissions,allow_other";
+      newargv[1] = "-odefault_permissions";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
