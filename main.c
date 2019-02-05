@@ -1737,7 +1737,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret == 0 && xattr_sfd >= 0)
     {
       const size_t buf_size = 1 << 20;
-      char *buf = malloc (buf_size);
+      buf = malloc (buf_size);
       if (buf == NULL)
         {
           ret = -1;
