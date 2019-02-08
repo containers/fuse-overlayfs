@@ -2593,22 +2593,33 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       fuse_reply_err (req, errno);
       return;
     }
-  if ((to_set & FUSE_SET_ATTR_SIZE))
+  if (to_set & FUSE_SET_ATTR_SIZE)
     {
-      int fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY|O_NONBLOCK));
-      if (fd < 0)
-        {
-          fuse_reply_err (req, errno);
-          return;
-        }
+      int fd, ret, saved_errno;
 
-      if (ftruncate (fd, attr->st_size) < 0)
+      if (fi == NULL)
         {
-          close (fd);
-          fuse_reply_err (req, errno);
+          fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY|O_NONBLOCK));
+          if (fd < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
+        }
+      else
+          fd = fi->fh;  // use existing fd if fuse_file_info is available
+
+      ret = ftruncate (fd, attr->st_size);
+      saved_errno = errno;
+
+      if (fi == NULL)
+        close (fd);
+
+      if (ret < 0)
+        {
+          fuse_reply_err (req, saved_errno);
           return;
         }
-      close (fd);
     }
 
   uid = old_st.st_uid;
