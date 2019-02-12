@@ -1696,7 +1696,11 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
             return -1;
 
           if (fsetxattr (dfd, it, xattr_buf, s, 0) < 0)
-            return -1;
+            {
+              if (errno == EINVAL)
+                continue;
+              return -1;
+            }
         }
     }
   return 0;
