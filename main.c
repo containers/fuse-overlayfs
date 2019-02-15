@@ -2331,13 +2331,6 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (p == NULL)
         return -1;
 
-      if (delete_whiteout (lo, -1, p, name) < 0)
-        return -1;
-
-      sprintf (path, "%s/%s", p->path, name);
-      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
-        return -1;
-
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
       fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode & ~ctx->umask));
@@ -2349,6 +2342,13 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
           unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
           return -1;
         }
+
+      sprintf (path, "%s/%s", p->path, name);
+      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
+        return -1;
+
+      if (delete_whiteout (lo, -1, p, name) < 0)
+        return -1;
 
       if (renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, path) < 0)
         {
