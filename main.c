@@ -1010,6 +1010,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
             if (insert_node (n, child, false) == NULL)
               {
                 errno = ENOMEM;
+                closedir (dp);
                 return NULL;
               }
         }
@@ -1799,7 +1800,10 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
 
   ret = TEMP_FAILURE_RETRY (fstat (sfd, &st));
   if (ret < 0)
-    return ret;
+    {
+      close (sfd);
+      return ret;
+    }
 
   times[0] = st.st_atim;
   times[1] = st.st_mtim;
