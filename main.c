@@ -1277,6 +1277,9 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   struct ovl_node *it;
   struct ovl_dirp *d = calloc (1, sizeof (struct ovl_dirp));
 
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_opendir(ino=%" PRIu64 ")\n", ino);
+
   if (d == NULL)
     {
       errno = ENOENT;
@@ -1493,6 +1496,8 @@ static void
 ovl_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	    off_t offset, struct fuse_file_info *fi)
 {
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_readdir(ino=%" PRIu64 ", size=%zu, offset=%llo)\n", ino, size, offset);
   ovl_do_readdir (req, ino, size, offset, fi, 0);
 }
 
@@ -1500,6 +1505,8 @@ static void
 ovl_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
 		off_t offset, struct fuse_file_info *fi)
 {
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_readdirplus(ino=%" PRIu64 ", size=%zu, offset=%llo)\n", ino, size, offset);
   ovl_do_readdir (req, ino, size, offset, fi, 1);
 }
 
@@ -1508,6 +1515,9 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
+
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
 
   for (s = 2; s < d->tbl_size; s++)
     {
