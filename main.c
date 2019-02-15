@@ -1486,7 +1486,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         const char *name;
         struct ovl_node *node = d->tbl[offset];
 
-        if (node == NULL || node->whiteout)
+        if (node == NULL || node->whiteout || node->hidden)
           continue;
 
         ret = rpl_stat (req, node, &st);
