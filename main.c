@@ -3516,6 +3516,8 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "suid") == 0)
     return 1;
+  if (strcmp (arg, "dev") == 0)
+    return 1;
 
   if (key == FUSE_OPT_KEY_NONOPT)
     {
