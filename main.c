@@ -1257,6 +1257,7 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
 struct ovl_dirp
 {
   struct ovl_data *lo;
+  struct ovl_node *parent;
   struct ovl_node **tbl;
   size_t tbl_size;
   size_t offset;
@@ -1304,6 +1305,7 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     goto out_errno;
 
   d->offset = 0;
+  d->parent = node;
   d->tbl_size = hash_get_n_entries (node->children) + 2;
   d->tbl = malloc (sizeof (struct ovl_node *) * d->tbl_size);
   if (d->tbl == NULL)
@@ -1460,7 +1462,11 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         else if (offset == 1)
           name = "..";
         else
-          name = node->name;
+          {
+            if (node->parent != d->parent)
+              continue;
+            name = node->name;
+          }
 
         if (!plus)
           entsize = fuse_add_direntry (req, p, remaining, name, &st, offset + 1);
