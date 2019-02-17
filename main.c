@@ -692,32 +692,45 @@ node_compare (const void *n1, const void *n2)
   return strcmp (node1->name, node2->name) == 0 ? true : false;
 }
 
+static void
+cleanup_node_initp (struct ovl_node **p)
+{
+  struct ovl_node *n = *p;
+  if (n == NULL)
+    return;
+  if (n->children)
+    hash_free (n->children);
+  free (n->name);
+  free (n->path);
+  free (n);
+}
+
+#define cleanup_node_init __attribute__((cleanup (cleanup_node_initp)))
+
 static struct ovl_node *
 make_whiteout_node (const char *path, const char *name)
 {
-  struct ovl_node *ret = calloc (1, sizeof (*ret));
+  struct ovl_node *ret_xchg;
+  cleanup_node_init struct ovl_node *ret = NULL;
+
+  ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
-    {
-      errno = ENOMEM;
-      return NULL;
-    }
+    return NULL;
+
   ret->name = strdup (name);
   if (ret->name == NULL)
-    {
-      free (ret);
-      errno = ENOMEM;
       return NULL;
-    }
+
   ret->path = strdup (path);
   if (ret->path == NULL)
-    {
-      free (ret->name);
-      free (ret);
-      errno = ENOMEM;
-      return NULL;
-    }
+    return NULL;
+
   ret->whiteout = 1;
-  return ret;
+
+  ret_xchg = ret;
+  ret = NULL;
+
+  return ret_xchg;
 }
 
 static ssize_t
@@ -762,43 +775,27 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
 static struct ovl_node *
 make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent)
 {
-  struct ovl_node *ret = malloc (sizeof (*ret));
-  if (ret == NULL)
-    {
-      errno = ENOMEM;
-      return NULL;
-    }
+  struct ovl_node *ret_xchg;
+  cleanup_node_init struct ovl_node *ret = NULL;
 
-  ret->last_layer = NULL;
+  ret = calloc (1, sizeof (*ret));
+  if (ret == NULL)
+      return NULL;
+
   ret->parent = parent;
-  ret->lookups = 0;
-  ret->do_unlink = 0;
-  ret->hidden = 0;
-  ret->do_rmdir = 0;
-  ret->whiteout = 0;
   ret->layer = layer;
   ret->ino = ino;
-  ret->present_lowerdir = 0;
   ret->hidden_dirfd = -1;
   ret->name = strdup (name);
   if (ret->name == NULL)
-    {
-      free (ret);
-      errno = ENOMEM;
-      return NULL;
-    }
+    return NULL;
 
   if (has_prefix (path, "./") && path[2])
     path += 2;
 
   ret->path = strdup (path);
   if (ret->path == NULL)
-    {
-      free (ret->name);
-      free (ret);
-      errno = ENOMEM;
-      return NULL;
-    }
+    return NULL;
 
   if (!dir_p)
     ret->children = NULL;
@@ -806,13 +803,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
     {
       ret->children = hash_initialize (10, NULL, node_hasher, node_compare, node_free);
       if (ret->children == NULL)
-        {
-          free (ret->path);
-          free (ret->name);
-          free (ret);
-          errno = ENOMEM;
-          return NULL;
-        }
+        return NULL;
     }
 
   if (ret->ino == 0)
@@ -823,13 +814,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
 
       path = strdup (ret->path);
       if (path == NULL)
-        {
-          free (ret->path);
-          free (ret->name);
-          free (ret);
-          errno = ENOMEM;
-          return NULL;
-        }
+        return NULL;
 
       for (it = layer; it; it = it->next)
         {
@@ -894,7 +879,10 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
         }
     }
 
-  return ret;
+  ret_xchg = ret;
+  ret = NULL;
+
+  return ret_xchg;
 }
 
 static struct ovl_node *
@@ -957,7 +945,10 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
     {
       n = make_ovl_node (path, layer, name, 0, true, NULL);
       if (n == NULL)
-        return NULL;
+        {
+          errno = ENOMEM;
+          return NULL;
+        }
     }
 
   for (it = lo->layers; it; it = it->next)
