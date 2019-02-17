@@ -1,3 +1,5 @@
+services:
+  - docker
 language: c
 sudo: required
 dist: trusty
@@ -16,6 +18,7 @@ addons:
       - g++
       - python3-setuptools
 before_install:
+  - docker pull fedora &
   - sudo mkdir -p /lower /upper /mnt
   - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
   - (git clone git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
@@ -28,3 +31,4 @@ script:
   - sudo make -j install; sudo cp fuse-overlayfs /sbin
   - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev)
   - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev)
+  - sudo tests/fedora-installs.sh
