@@ -1082,6 +1082,15 @@ free_layers (struct ovl_layer *layers)
   free (layers);
 }
 
+static void
+cleanup_layerp (struct ovl_layer **p)
+{
+  struct ovl_layer *l = *p;
+  free_layers (l);
+}
+
+#define cleanup_layer __attribute__((cleanup (cleanup_layerp)))
+
 static struct ovl_layer *
 read_dirs (char *path, bool low, struct ovl_layer *layers)
 {
@@ -1102,36 +1111,20 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
 
   for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
-      cleanup_free char *full_path = NULL;
-      struct ovl_layer *l = NULL;
+      cleanup_layer struct ovl_layer *l = NULL;
 
-      full_path = realpath (it, NULL);
-      if (full_path == NULL)
-        return NULL;
-
-      l = malloc (sizeof (*l));
+      l = calloc (1, sizeof (*l));
       if (l == NULL)
-        {
-          free_layers (layers);
-          return NULL;
-        }
+        return NULL;
+      l->fd = -1;
 
-      l->path = strdup (full_path);
+      l->path = realpath (it, NULL);
       if (l->path == NULL)
-        {
-          free (l);
-          free_layers (layers);
-          return NULL;
-        }
+        return NULL;
 
       l->fd = open (l->path, O_DIRECTORY);
       if (l->fd < 0)
-        {
-          free (l->path);
-          free (l);
-          free_layers (layers);
-          return NULL;
-        }
+        return NULL;
 
       l->low = low;
       if (low)
@@ -1150,6 +1143,7 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
           l->next = layers;
           layers = l;
         }
+      l = NULL;
     }
   return layers;
 }
@@ -3734,6 +3728,8 @@ main (int argc, char *argv[])
                         .mountpoint = NULL,
   };
   int ret = -1;
+  cleanup_layer struct ovl_layer *layers = NULL;
+  struct ovl_layer *tmp_layer = NULL;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
 
   if (getenv ("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT"))
@@ -3795,13 +3791,16 @@ main (int argc, char *argv[])
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
 
-  lo.layers = read_dirs (lo.lowerdir, true, NULL);
-  if (lo.layers == NULL)
-    error (EXIT_FAILURE, errno, "cannot read lower dirs");
+  layers = read_dirs (lo.lowerdir, true, NULL);
+  if (layers == NULL)
+    {
+      error (EXIT_FAILURE, errno, "cannot read lower dirs");
+    }
 
-  lo.layers = read_dirs (lo.upperdir, false, lo.layers);
-  if (lo.layers == NULL)
+  tmp_layer = read_dirs (lo.upperdir, false, layers);
+  if (tmp_layer == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
+  lo.layers = layers = tmp_layer;
 
   lo.root = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
   if (lo.root == NULL)
@@ -3865,7 +3864,6 @@ err_out1:
 
   close (lo.workdir_fd);
 
-  free_layers (lo.layers);
   fuse_opt_free_args (&args);
 
   return ret ? 1 : 0;
