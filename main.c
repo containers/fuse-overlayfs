@@ -720,6 +720,45 @@ make_whiteout_node (const char *path, const char *name)
   return ret;
 }
 
+static ssize_t
+safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
+{
+  cleanup_free char *buffer = NULL;
+  size_t current_size;
+  ssize_t s;
+
+  current_size = initial_size;
+  buffer = malloc (current_size + 1);
+  if (buffer == NULL)
+    return -1;
+
+  while (1)
+    {
+      char *tmp;
+
+      s = fgetxattr (sfd, name, buffer, current_size);
+      if (s < 0)
+        break;
+      if (s < current_size)
+        break;
+
+      current_size *= 2;
+      tmp = realloc (buffer, current_size + 1);
+      if (tmp == NULL)
+        return -1;
+
+      buffer = tmp;
+    }
+
+  buffer[s] == '\0';
+
+  /* Change owner.  */
+  *ret = buffer;
+  buffer = NULL;
+
+  return s;
+}
+
 static struct ovl_node *
 make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent)
 {
@@ -780,12 +819,23 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
     {
       struct stat st;
       struct ovl_layer *it;
-      char path[PATH_MAX];
+      cleanup_free char *path = NULL;
 
-      strcpy (path, ret->path);
+      path = strdup (ret->path);
+      if (path == NULL)
+        {
+          free (ret->path);
+          free (ret->name);
+          free (ret);
+          errno = ENOMEM;
+          return NULL;
+        }
+
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
+          cleanup_free char *val = NULL;
+          cleanup_free char *origin = NULL;
           cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_PATH));
           if (fd < 0)
             continue;
@@ -797,11 +847,11 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
           if (fd < 0)
             continue;
-          s = fgetxattr (fd, PRIVILEGED_ORIGIN_XATTR, path, sizeof (path) - 1);
+          s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
             {
               char buf[512];
-              struct ovl_fh *ofh = (struct ovl_fh *) path;
+              struct ovl_fh *ofh = (struct ovl_fh *) val;
               size_t s = ofh->len - sizeof (*ofh);
               struct file_handle *fh = (struct file_handle *) buf;
 
@@ -831,9 +881,13 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
             }
 
           /* If an origin is specified, use it for the next layer lookup.  */
-          s = fgetxattr (fd, ORIGIN_XATTR, path, sizeof (path) - 1);
+          s = safe_read_xattr (&origin, fd, ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
-            path[s] = '\0';
+            {
+              free (path);
+              path = origin;
+              origin = NULL;
+            }
 
           if (parent && parent->last_layer == it)
             break;
@@ -1687,18 +1741,18 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 {
   size_t xattr_len;
 
-  xattr_len = flistxattr (sfd, buf, buf_size / 2);
+  xattr_len = flistxattr (sfd, buf, buf_size);
   if (xattr_len > 0)
     {
       char *it;
-      char *xattr_buf = buf + buf_size / 2;
       for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
         {
-          ssize_t s = fgetxattr (sfd, it, xattr_buf, buf_size / 2);
+          cleanup_free char *v = NULL;
+          ssize_t s = safe_read_xattr (&v, sfd, it, 256);
           if (s < 0)
             return -1;
 
-          if (fsetxattr (dfd, it, xattr_buf, s, 0) < 0)
+          if (fsetxattr (dfd, it, v, s, 0) < 0)
             {
               if (errno == EINVAL)
                 continue;
@@ -2737,64 +2791,21 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
           cleanup_close int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
           if (sfd >= 0)
             {
-              size_t current_size = PATH_MAX + 1;
               cleanup_free char *origin_path = NULL;
               ssize_t s;
 
-              origin_path = malloc (current_size);
-              if (origin_path == NULL)
-                {
-                  fuse_reply_err (req, errno);
-                  return;
-                }
-
-              while (1)
-                {
-                  char *tmp;
-
-                  s = fgetxattr (sfd, PRIVILEGED_ORIGIN_XATTR, origin_path, current_size);
-                  if (s < 0)
-                    break;
-                  if (s < current_size)
-                    break;
-
-                  current_size *= 2;
-                  tmp = realloc (origin_path, current_size);
-                  if (tmp == NULL)
-                    {
-                      fuse_reply_err (req, errno);
-                      return;
-                    }
-                  origin_path = tmp;
-                }
+              s = safe_read_xattr (&origin_path, sfd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX + 1);
               if (s > 0)
                 fsetxattr (dfd, PRIVILEGED_ORIGIN_XATTR, origin_path, s, 0);
-
-              while (1)
+              else
                 {
-                  char *tmp;
-
-                  s = fgetxattr (sfd, ORIGIN_XATTR, origin_path, current_size);
-                  if (s < 0)
-                    break;
-                  if (s < current_size)
-                    break;
-
-                  current_size *= 2;
-                  tmp = realloc (origin_path, current_size);
-                  if (tmp == NULL)
-                    {
-                      fuse_reply_err (req, errno);
-                      return;
-                    }
-                  origin_path = tmp;
+                  s = safe_read_xattr (&origin_path, sfd, ORIGIN_XATTR, PATH_MAX + 1);
+                  if (s > 0)
+                    fsetxattr (dfd, PRIVILEGED_ORIGIN_XATTR, origin_path, s, 0);
+                  else
+                    fsetxattr (dfd, ORIGIN_XATTR, node->path, strlen (node->path), 0);
                 }
-              if (s > 0)
-                set = fsetxattr (dfd, ORIGIN_XATTR, origin_path, s, 0) == 0;
             }
-
-          if (! set)
-            fsetxattr (dfd, ORIGIN_XATTR, node->path, strlen (node->path), 0);
         }
     }
 
