@@ -25,10 +25,10 @@ before_install:
   - (git clone https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
   - (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.2.4/fuse-3.2.4.tar.xz; tar xf fuse-3.2.4.tar.xz; cd fuse-3.2.4; mkdir build; cd build; meson .. --prefix /usr && ninja && sudo ninja install)
 script:
-  - ./autogen.sh
-  - ./configure
-  - make -j $(nproc)
-  - sudo make -j install; sudo cp fuse-overlayfs /sbin
-  - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev)
-  - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev)
+  - ./autogen.sh || travis_terminate 1;
+  - ./configure || travis_terminate 1;
+  - make -j $(nproc) || travis_terminate 1;
+  - sudo make -j install; sudo cp fuse-overlayfs /sbin || travis_terminate 1;
+  - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
+  - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
   - sudo tests/fedora-installs.sh
