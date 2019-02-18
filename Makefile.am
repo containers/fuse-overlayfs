@@ -4,7 +4,7 @@ bin_PROGRAMS = fuse-overlayfs
 
 ACLOCAL_AMFLAGS = -Im4
 
-EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse-overlayfs.1.md
+EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse-overlayfs.1.md utils.h
 
 CLEANFILES = fuse-overlayfs.1
 
