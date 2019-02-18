@@ -376,15 +376,41 @@ is_directory_opaque (int dirfd, const char *path)
 }
 
 static int
-create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod)
+create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod, bool force_create)
 {
   static bool can_mknod = true;
   cleanup_close int fd = -1;
+  int ret;
+
+  if (! force_create)
+    {
+      cleanup_free char *path = NULL;
+      struct ovl_layer *l;
+      bool found = false;
+
+      ret = asprintf (&path, "%s/%s", parent->path, name);
+      if (ret < 0)
+        return ret;
+
+      for (l = get_lower_layers (lo); l; l = l->next)
+        {
+          struct stat st;
+
+          ret = TEMP_FAILURE_RETRY (fstatat (l->fd, path, &st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno == ENOENT)
+            continue;
+
+          found = true;
+          break;
+        }
+      /* Not present in the lower layers, do not do anything.  */
+      if (!found)
+        return 0;
+    }
 
   if (!disable_ovl_whiteout && !skip_mknod && can_mknod)
     {
       cleanup_free char *whiteout_path = NULL;
-      int ret;
 
       ret = asprintf (&whiteout_path, "%s/%s", parent->path, name);
       if (ret < 0)
@@ -505,7 +531,7 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
             return -1;
           if (node->parent)
             {
-              if (create_whiteout (lo, node->parent, node->name, false) < 0)
+              if (create_whiteout (lo, node->parent, node->name, false, false) < 0)
                 return -1;
             }
         }
@@ -1495,7 +1521,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                   continue;
                 }
 
-              if (create_whiteout (lo, node, dent->d_name, false) < 0)
+              if (create_whiteout (lo, node, dent->d_name, false, true) < 0)
                 return -1;
             }
         }
@@ -3215,7 +3241,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
      whiteout file until the renameat2 is completed.  */
   if (node_dirp (node))
     {
-      ret = create_whiteout (lo, destpnode, newname, true);
+      ret = create_whiteout (lo, destpnode, newname, true, true);
       if (ret < 0)
         goto error;
       unlinkat (destfd, newname, 0);
@@ -3231,7 +3257,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       if (ret < 0)
         goto error;
 
-      ret = create_whiteout (lo, pnode, name, false);
+      ret = create_whiteout (lo, pnode, name, false, true);
       if (ret < 0)
         goto error;
     }
@@ -3379,7 +3405,7 @@ hide_all (struct ovl_data *lo, struct ovl_node *node)
       int ret;
 
       it = nodes[i];
-      ret = create_whiteout (lo, node, it->name, false);
+      ret = create_whiteout (lo, node, it->name, false, true);
       node_free (it);
 
       if (ret < 0)
