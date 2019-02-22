@@ -1765,7 +1765,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 
           if (fsetxattr (dfd, it, v, s, 0) < 0)
             {
-              if (errno == EINVAL)
+              if (errno == EINVAL || errno == EOPNOTSUPP)
                 continue;
               return -1;
             }
