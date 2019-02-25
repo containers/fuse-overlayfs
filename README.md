@@ -25,9 +25,9 @@ $ fuse-overlayfs -o uidmapping=0:10:100:100:10000:2000,gidmapping=0:10:100:100:1
 Build Requirements:
 =======================================================
 
-This links to libfuse > v3
+fuse-overlayfs requires libfuse > v3.2.1
 
-On fedora: `dnf install fuse3-devel`
+On Fedora: `dnf install fuse3-devel`
 
 
 Static Build:
