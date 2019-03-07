@@ -36,7 +36,23 @@
 #include <assert.h>
 #include <errno.h>
 #include <err.h>
-#include <error.h>
+
+#ifdef HAVE_ERROR_H
+# include <error.h>
+#else
+# define error(status, errno, fmt, ...) do {                           \
+    if (errno == 0)                                                     \
+      fprintf (stderr, "crun: " fmt "\n", ##__VA_ARGS__);               \
+    else                                                                \
+      {                                                                 \
+        fprintf (stderr, "crun: " fmt, ##__VA_ARGS__);                  \
+        fprintf (stderr, ": %s\n", strerror (errno));                   \
+      }                                                                 \
+    if (status)                                                         \
+      exit (status);                                                    \
+  } while(0)
+#endif
+
 #include <inttypes.h>
 #include <fcntl.h>
 #include <hash.h>
