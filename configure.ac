@@ -32,7 +32,7 @@ PKG_CHECK_MODULES([FUSE], [fuse3 >= 3.2.1], [AC_DEFINE([HAVE_FUSE], 1, [Define i
 
 AC_FUNC_ERROR_AT_LINE
 AC_FUNC_MALLOC
-AC_CHECK_FUNCS([error memset strdup])
+AC_CHECK_FUNCS([open_by_handle_at error memset strdup])
 
 AC_CONFIG_FILES([Makefile lib/Makefile])
 AC_OUTPUT

@@ -73,6 +73,22 @@
 
 #include <utils.h>
 
+#ifndef HAVE_OPEN_BY_HANDLE_AT
+struct file_handle
+{
+  unsigned int  handle_bytes;   /* Size of f_handle [in, out] */
+  int           handle_type;    /* Handle type [out] */
+  unsigned char f_handle[0];    /* File identifier (sized by
+				   caller) [out] */
+};
+
+int
+open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
+{
+  return syscall (SYS_open_by_handle_at, mount_fd, handle, flags);
+}
+#endif
+
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
