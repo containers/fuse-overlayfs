@@ -1220,6 +1220,9 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
               if (errno == ENOENT)
                 {
+                  if (node)
+                    continue;
+
                   ret = asprintf (&whpath, "%s/.wh.%s", pnode->path, name);
                   if (ret < 0)
                     return NULL;
@@ -1239,10 +1242,6 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                     }
                   continue;
                 }
-
-              if (node)
-                node_free (node);
-
               errno = saved_errno;
               return NULL;
             }
@@ -1250,19 +1249,10 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           /* If we already know the node, simply update the ino.  */
           if (node)
             {
-              if (node->whiteout && it == upper_layer)
-                {
-                  hash_delete (pnode->children, node);
-                  node_free (node);
-                  node = NULL;
-                }
-              else
-                {
-                  node->ino = st.st_ino;
-                  if (it->low)
-                    node->present_lowerdir = 1;
-                  continue;
-                }
+              node->ino = st.st_ino;
+              if (it->low)
+                node->present_lowerdir = 1;
+              continue;
             }
 
           if (whpath == NULL)
