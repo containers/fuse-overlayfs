@@ -420,6 +420,7 @@ is_directory_opaque (int dirfd, const char *path)
 static int
 create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod, bool force_create)
 {
+  cleanup_free char *whiteout_wh_path = NULL;
   static bool can_mknod = true;
   cleanup_close int fd = -1;
   int ret;
@@ -467,18 +468,14 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       /* if it fails with EPERM then do not attempt mknod again.  */
       can_mknod = false;
     }
-  else
-    {
-      cleanup_free char *whiteout_path = NULL;
-      int ret;
 
-      ret = asprintf (&whiteout_path, "%s/.wh.%s", parent->path, name);
-      if (ret < 0)
-        return ret;
-      fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
-      if (fd < 0 && errno != EEXIST)
-        return -1;
-    }
+  ret = asprintf (&whiteout_wh_path, "%s/.wh.%s", parent->path, name);
+  if (ret < 0)
+    return ret;
+  fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_wh_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
+  if (fd < 0 && errno != EEXIST)
+    return -1;
+
   return 0;
 }
 
