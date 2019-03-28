@@ -32,9 +32,58 @@ done to the file system will be written.
 A directory used internally by fuse-overlays, must be on the same file
 system as the upper dir.
 
+**-o workdir=workdir**
+A directory used internally by fuse-overlays, must be on the same file
+system as the upper dir.
+
+**-o uidmapping=UID:MAPPED-UID:LEN[,UID2:MAPPED-UID2:LEN2]**
+**-o gidmapping=GID:MAPPED-GID:LEN[,GID2:MAPPED-GID2:LEN2]**
+Specifies the dynamic UID/GID mapping used by fuse-overlayfs when
+reading/writing files to the system.
+
+The fuse-overlayfs dynamic mapping is an alternative and cheaper way
+to chown'ing the files on the host to accomodate the user namespace
+settings.
+
+It is useful to share the same storage among different user namespaces
+and counter effect the mapping done by the user namespace itself, and
+without requiring to chown the files.
+
+For example, given on the host two files like:
+
+$ stat -c %u:%g lower/a lower/b
+0:0
+1:1
+
+When we run in a user namespace with the following configuration:
+$ cat /proc/self/uid_map
+         0       1000          1
+         1     110000      65536
+
+We would see:
+
+$ stat -c %u:%g merged/a merged/b
+65534:65534
+65534:65534
+
+65534 is the overflow id used when the UID/GID is not known inside the
+user namespace.  This happens because both users 0:0 and 1:1 are not
+mapped.
+
+In the above example, if we mount the fuse-overlayfs file system using:
+`-ouidmapping=0:1000:1:1:110000:65536,gidmapping=0:1000:1:1:110000:65536`,
+which is the namespace configuration specified on a single line, we'd
+see from the same user namespace:
+
+$ stat -c %u:%g merged/a merged/b
+0:0
+1:1
+
+Those are the same IDs visible from outside the user namespace.
+
 # SEE ALSO
 
-**fuse**(8), **mount**(8)
+**fuse**(8), **mount**(8), **user_namespaces**(7)
 
 # AVAILABILITY
 
