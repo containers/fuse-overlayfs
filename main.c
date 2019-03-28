@@ -133,6 +133,9 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 
 static bool disable_ovl_whiteout;
 
+static uid_t overflow_uid;
+static gid_t overflow_gid;
+
 struct ovl_layer
 {
   struct ovl_layer *next;
@@ -313,6 +316,37 @@ dump_directory (struct ovl_node *node)
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     printf ("ENTRY: %s (%s)\n", it->name, it->path);
+}
+
+static long int
+read_file_as_int (const char *file)
+{
+  cleanup_close int fd = -1;
+  long int ret;
+  char buffer[256];
+  int r;
+
+  fd = open (file, O_RDONLY);
+  if (fd < 0)
+    error (EXIT_FAILURE, errno, "can't open %s", file);
+
+  r = read (fd, buffer, sizeof (buffer) - 1);
+  if (r < 0)
+    error (EXIT_FAILURE, errno, "can't read from %s", file);
+  buffer[r] = '\0';
+
+  ret = strtol (buffer, NULL, 10);
+  if (ret == 0)
+    error (EXIT_FAILURE, errno, "can't parse %s", file);
+
+  return ret;
+}
+
+static void
+read_overflowids (void)
+{
+  overflow_uid = read_file_as_int ("/proc/sys/kernel/overflowuid");
+  overflow_gid = read_file_as_int ("/proc/sys/kernel/overflowgid");
 }
 
 static bool
@@ -607,7 +641,7 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 }
 
 static unsigned int
-find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct)
+find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool uid)
 {
   if (mapping == NULL)
     return id;
@@ -624,19 +658,19 @@ find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct)
             return mapping->host + (id - mapping->to);
         }
     }
-    return 65534;
+  return uid ? overflow_uid : overflow_gid;
 }
 
 static uid_t
 get_uid (struct ovl_data *data, uid_t id)
 {
-  return find_mapping (id, data->uid_mappings, false);
+  return find_mapping (id, data->uid_mappings, false, false);
 }
 
 static uid_t
 get_gid (struct ovl_data *data, gid_t id)
 {
-  return find_mapping (id, data->gid_mappings, false);
+  return find_mapping (id, data->gid_mappings, false, false);
 }
 
 static int
@@ -649,8 +683,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, struct stat *st)
   if (ret < 0)
     return ret;
 
-  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true);
-  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true);
+  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
+  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
 
   st->st_ino = node->ino;
   if (ret == 0 && node_dirp (node))
@@ -3809,6 +3843,8 @@ main (int argc, char *argv[])
 
   if (opts.mountpoint)
     free (opts.mountpoint);
+
+  read_overflowids ();
 
   if (opts.show_help)
     {
