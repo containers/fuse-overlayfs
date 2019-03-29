@@ -3741,7 +3741,10 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
   if (strcmp (arg, "-V") == 0)
     return 1;
   if (strcmp (arg, "--debug") == 0)
-    return 1;
+    {
+      ovl_data->debug = 1;
+      return 1;
+    }
 
   if (strcmp (arg, "allow_root") == 0)
     return 1;
@@ -3858,8 +3861,6 @@ main (int argc, char *argv[])
       exit (EXIT_SUCCESS);
     }
 
-  lo.debug = opts.debug;
-
   if (lo.redirect_dir && strcmp (lo.redirect_dir, "off"))
     error (EXIT_FAILURE, 0, "fuse-overlayfs only supports redirect_dir=off");
 
@@ -3880,12 +3881,15 @@ main (int argc, char *argv[])
 
   set_limits ();
 
-  fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
-  fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
-  fprintf (stderr, "upperdir=%s\n", lo.upperdir);
-  fprintf (stderr, "workdir=%s\n", lo.workdir);
-  fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
-  fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
+  if (lo.debug)
+    {
+      fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
+      fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
+      fprintf (stderr, "upperdir=%s\n", lo.upperdir);
+      fprintf (stderr, "workdir=%s\n", lo.workdir);
+      fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
+      fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
+    }
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
