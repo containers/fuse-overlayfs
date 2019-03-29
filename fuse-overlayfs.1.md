@@ -21,6 +21,9 @@ namespace.
 
 # OPTIONS
 
+**--debug**
+Enable debugging mode, can be very noisy.
+
 **-o lowerdir=low1[:low2...]**
 A list of directories separated by `:`.  Their content is merged.
 
