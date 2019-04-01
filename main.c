@@ -36,6 +36,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <err.h>
+#include <sys/ioctl.h>
 
 #ifdef HAVE_ERROR_H
 # include <error.h>
@@ -117,6 +118,10 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
+
+#if !defined FICLONE && defined __linux__
+# define FICLONE _IOW (0x94, 9, int)
+#endif
 
 #define NODE_TO_INODE(x) ((fuse_ino_t) x)
 
@@ -1954,6 +1959,8 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   cleanup_free char *buf = NULL;
   struct timespec times[2];
   char wd_tmp_file_name[32];
+  static bool support_reflinks = true;
+  bool data_copied = false;
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
@@ -2019,27 +2026,42 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   buf = malloc (buf_size);
   if (buf == NULL)
     goto exit;
-  for (;;)
+
+  if (support_reflinks)
     {
-      int written;
-      int nread;
+      if (ioctl (dfd, FICLONE, sfd) >= 0)
+        data_copied = true;
+      else if (errno == ENOTSUP || errno == EINVAL)
+        {
+          /* Fallback to data copy and don't attempt again FICLONE.  */
+          support_reflinks = false;
+        }
+    }
 
-      nread = TEMP_FAILURE_RETRY (read (sfd, buf, buf_size));
-      if (nread < 0)
-        goto exit;
+  if (! data_copied)
+    {
+      for (;;)
+        {
+          int written;
+          int nread;
 
-      if (nread == 0)
-        break;
+          nread = TEMP_FAILURE_RETRY (read (sfd, buf, buf_size));
+          if (nread < 0)
+            goto exit;
 
-      written = 0;
-      {
-        ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
-        if (ret < 0)
-          goto exit;
-        written += ret;
-        nread -= ret;
-      }
-      while (nread);
+          if (nread == 0)
+            break;
+
+          written = 0;
+          {
+            ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
+            if (ret < 0)
+              goto exit;
+            written += ret;
+            nread -= ret;
+          }
+          while (nread);
+        }
     }
 
   times[0] = st.st_atim;
