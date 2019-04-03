@@ -37,6 +37,9 @@
 #include <errno.h>
 #include <err.h>
 #include <sys/ioctl.h>
+#ifdef HAVE_SYS_SENDFILE_H
+# include <sys/sendfile.h>
+#endif
 
 #ifdef HAVE_ERROR_H
 # include <error.h>
@@ -1948,6 +1951,36 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
 }
 
 static int
+copy_fd_to_fd (int sfd, int dfd, char *buf, size_t buf_size)
+{
+  int ret;
+
+  for (;;)
+    {
+      int written;
+      int nread;
+
+      nread = TEMP_FAILURE_RETRY (read (sfd, buf, buf_size));
+      if (nread < 0)
+        return nread;
+
+      if (nread == 0)
+        break;
+
+      written = 0;
+      {
+        ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
+        if (ret < 0)
+          return ret;
+        written += ret;
+        nread -= ret;
+      }
+      while (nread);
+    }
+  return 0;
+}
+
+static int
 copyup (struct ovl_data *lo, struct ovl_node *node)
 {
   int saved_errno;
@@ -2038,30 +2071,33 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
         }
     }
 
+#ifdef HAVE_SYS_SENDFILE_H
   if (! data_copied)
     {
-      for (;;)
+      off_t copied = 0;
+
+      while (copied < st.st_size)
         {
-          int written;
-          int nread;
+          off_t tocopy = st.st_size - copied;
+          ssize_t n = sendfile (dfd, sfd, NULL, tocopy > SIZE_MAX ? SIZE_MAX : (size_t) tocopy);
+          if (n < 0)
+            {
+              /* On failure, fallback to the read/write loop.  */
+              ret = copy_fd_to_fd (sfd, dfd, buf, buf_size);
+              if (ret < 0)
+                goto exit;
+            }
+          copied += n;
+	}
+      data_copied = true;
+    }
+#endif
 
-          nread = TEMP_FAILURE_RETRY (read (sfd, buf, buf_size));
-          if (nread < 0)
-            goto exit;
-
-          if (nread == 0)
-            break;
-
-          written = 0;
-          {
-            ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
-            if (ret < 0)
-              goto exit;
-            written += ret;
-            nread -= ret;
-          }
-          while (nread);
-        }
+  if (! data_copied)
+    {
+      ret = copy_fd_to_fd (sfd, dfd, buf, buf_size);
+      if (ret < 0)
+        goto exit;
     }
 
   times[0] = st.st_atim;
