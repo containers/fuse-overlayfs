@@ -3749,6 +3749,75 @@ ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
+static void
+ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
+           struct fuse_file_info *fi, unsigned flags,
+           const void *in_buf, size_t in_bufsz, size_t out_bufsz)
+{
+  struct ovl_data *lo = ovl_data (req);
+  cleanup_close int cleaned_fd = -1;
+  struct ovl_node *node;
+  int fd = -1;
+  unsigned long r;
+
+  if (flags & FUSE_IOCTL_COMPAT)
+    {
+      fuse_reply_err (req, ENOSYS);
+      return;
+    }
+
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_ioctl(ino=%" PRIu64 ", cmd=%d, arg=%p, fi=%p, flags=%d, buf=%p, in_bufsz=%zu, out_bufsz=%zu)\n",
+             ino, cmd, arg, fi, flags, in_buf, in_bufsz, out_bufsz);
+
+  node = do_lookup_file (lo, ino, NULL);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
+  switch (cmd)
+    {
+    case FS_IOC_GETVERSION:
+    case FS_IOC_GETFLAGS:
+      if (fi->fh >= 0)
+        fd = fi->fh;
+      break;
+
+    case FS_IOC_SETVERSION:
+    case FS_IOC_SETFLAGS:
+      node = get_node_up (lo, node);
+      if (node == NULL)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+      if (in_bufsz >= sizeof (r))
+          r = *(unsigned long *) in_buf;
+      break;
+
+    default:
+        fuse_reply_err (req, ENOSYS);
+        break;
+    }
+
+  if (fd < 0)
+    {
+      fd = cleaned_fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
+      if (fd < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+    }
+
+  if (ioctl (fd, cmd, &r) < 0)
+    fuse_reply_err (req, errno);
+  else
+    fuse_reply_ioctl (req, 0, &r, out_bufsz ? sizeof (r) : 0);
+}
+
 static struct fuse_lowlevel_ops ovl_oper =
   {
    .statfs = ovl_statfs,
@@ -3781,6 +3850,7 @@ static struct fuse_lowlevel_ops ovl_oper =
    .link = ovl_link,
    .fsync = ovl_fsync,
    .flock = ovl_flock,
+   .ioctl = ovl_ioctl,
   };
 
 static int
