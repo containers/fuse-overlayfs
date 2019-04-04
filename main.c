@@ -3799,7 +3799,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
 
     default:
         fuse_reply_err (req, ENOSYS);
-        break;
+        return;
     }
 
   if (fd < 0)
