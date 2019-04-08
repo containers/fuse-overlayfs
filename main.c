@@ -2603,7 +2603,7 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 	     ino, out_buf.buf[0].size, (unsigned long) off, (int) fi->fh);
 
   errno = 0;
-  res = fuse_buf_copy (&out_buf, in_buf, 0);
+  res = fuse_buf_copy (&out_buf, in_buf, FUSE_BUF_SPLICE_MOVE | FUSE_BUF_SPLICE_NONBLOCK);
   if (res < 0)
     fuse_reply_err (req, errno);
   else
