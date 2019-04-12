@@ -3441,7 +3441,7 @@ ovl_statfs (fuse_req_t req, fuse_ino_t ino)
   if (ovl_debug (req))
     fprintf (stderr, "ovl_statfs(ino=%" PRIu64 "s)\n", ino);
 
-  ret = statvfs (lo->upperdir, &sfs);
+  ret = fstatvfs (get_upper_layer (lo)->fd, &sfs);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
