@@ -420,7 +420,7 @@ set_fd_opaque (int fd)
     {
       if (errno == ENOTSUP)
         return 0;
-      if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0)
+      if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0 && errno != ENOTSUP)
           return -1;
     }
 
