@@ -121,6 +121,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
+#define OPAQUE_WHITEOUT ".wh..wh..opq"
 
 #if !defined FICLONE && defined __linux__
 # define FICLONE _IOW (0x94, 9, int)
@@ -449,14 +450,22 @@ is_directory_opaque (int dirfd, const char *path)
   if (s < 0)
     {
       if (saved_errno == ENOTSUP || saved_errno == ENODATA)
-        return 0;
+        {
+          struct stat st;
+          cleanup_free char *whiteout_opq_path = NULL;
+
+          if (asprintf (&whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path) < 0)
+            return -1;
+
+          if (fstatat (dirfd, whiteout_opq_path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+            return 1;
+
+          return (errno == ENOENT) ? 0 : -1;
+        }
       return -1;
     }
 
-  if (b[0] == 'y')
-    return 1;
-
-  return 0;
+  return b[0] == 'y' ? 1 : 0;
 }
 
 static int
