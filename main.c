@@ -1130,12 +1130,12 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           if (ret < 0)
             return NULL;
 
-          ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
-          if (ret < 0 && errno != ENOENT)
-            return NULL;
-
           ret = asprintf (&node_path, "%s/%s", n->path, dent->d_name);
           if (ret < 0)
+            return NULL;
+
+          ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
             return NULL;
 
           if (ret == 0)
