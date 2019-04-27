@@ -417,15 +417,20 @@ has_prefix (const char *str, const char *pref)
 static int
 set_fd_opaque (int fd)
 {
-  if (fsetxattr (fd, PRIVILEGED_OPAQUE_XATTR, "y", 1, 0) < 0)
+  cleanup_close int opq_whiteout_fd = -1;
+  int ret;
+
+  ret = fsetxattr (fd, PRIVILEGED_OPAQUE_XATTR, "y", 1, 0);
+  if (ret < 0)
     {
       if (errno == ENOTSUP)
-        return 0;
+        goto create_opq_whiteout;
       if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0 && errno != ENOTSUP)
           return -1;
     }
-
-  return 0;
+ create_opq_whiteout:
+  opq_whiteout_fd = TEMP_FAILURE_RETRY (openat (fd, OPAQUE_WHITEOUT, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
+  return (opq_whiteout_fd >= 0 || ret == 0) ? 0 : -1;
 }
 
 static int
