@@ -46,10 +46,10 @@
 #else
 # define error(status, errno, fmt, ...) do {                           \
     if (errno == 0)                                                     \
-      fprintf (stderr, "crun: " fmt "\n", ##__VA_ARGS__);               \
+      fprintf (stderr, "fuse-overlayfs: " fmt "\n", ##__VA_ARGS__);     \
     else                                                                \
       {                                                                 \
-        fprintf (stderr, "crun: " fmt, ##__VA_ARGS__);                  \
+        fprintf (stderr, "fuse-overlayfs: " fmt, ##__VA_ARGS__);        \
         fprintf (stderr, ": %s\n", strerror (errno));                   \
       }                                                                 \
     if (status)                                                         \
