@@ -46,10 +46,10 @@
 #else
 # define error(status, errno, fmt, ...) do {                           \
     if (errno == 0)                                                     \
-      fprintf (stderr, "crun: " fmt "\n", ##__VA_ARGS__);               \
+      fprintf (stderr, "fuse-overlayfs: " fmt "\n", ##__VA_ARGS__);     \
     else                                                                \
       {                                                                 \
-        fprintf (stderr, "crun: " fmt, ##__VA_ARGS__);                  \
+        fprintf (stderr, "fuse-overlayfs: " fmt, ##__VA_ARGS__);        \
         fprintf (stderr, ": %s\n", strerror (errno));                   \
       }                                                                 \
     if (status)                                                         \
@@ -121,6 +121,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
+#define OPAQUE_WHITEOUT ".wh..wh..opq"
 
 #if !defined FICLONE && defined __linux__
 # define FICLONE _IOW (0x94, 9, int)
@@ -416,15 +417,20 @@ has_prefix (const char *str, const char *pref)
 static int
 set_fd_opaque (int fd)
 {
-  if (fsetxattr (fd, PRIVILEGED_OPAQUE_XATTR, "y", 1, 0) < 0)
+  cleanup_close int opq_whiteout_fd = -1;
+  int ret;
+
+  ret = fsetxattr (fd, PRIVILEGED_OPAQUE_XATTR, "y", 1, 0);
+  if (ret < 0)
     {
       if (errno == ENOTSUP)
-        return 0;
+        goto create_opq_whiteout;
       if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0 && errno != ENOTSUP)
           return -1;
     }
-
-  return 0;
+ create_opq_whiteout:
+  opq_whiteout_fd = TEMP_FAILURE_RETRY (openat (fd, OPAQUE_WHITEOUT, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
+  return (opq_whiteout_fd >= 0 || ret == 0) ? 0 : -1;
 }
 
 static int
@@ -449,14 +455,22 @@ is_directory_opaque (int dirfd, const char *path)
   if (s < 0)
     {
       if (saved_errno == ENOTSUP || saved_errno == ENODATA)
-        return 0;
+        {
+          struct stat st;
+          cleanup_free char *whiteout_opq_path = NULL;
+
+          if (asprintf (&whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path) < 0)
+            return -1;
+
+          if (fstatat (dirfd, whiteout_opq_path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+            return 1;
+
+          return (errno == ENOENT) ? 0 : -1;
+        }
       return -1;
     }
 
-  if (b[0] == 'y')
-    return 1;
-
-  return 0;
+  return b[0] == 'y' ? 1 : 0;
 }
 
 static int
@@ -1121,12 +1135,12 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           if (ret < 0)
             return NULL;
 
-          ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
-          if (ret < 0 && errno != ENOENT)
-            return NULL;
-
           ret = asprintf (&node_path, "%s/%s", n->path, dent->d_name);
           if (ret < 0)
+            return NULL;
+
+          ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          if (ret < 0 && errno != ENOENT)
             return NULL;
 
           if (ret == 0)
