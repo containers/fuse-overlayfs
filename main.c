@@ -3343,7 +3343,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
           destnode = NULL;
         }
 
-      if (destnode)
+      if (destnode && !destnode_is_whiteout)
         {
           /* If the node is still accessible then be sure we
              can write to it.  Fix it to be done when a write is
