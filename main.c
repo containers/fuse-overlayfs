@@ -2093,13 +2093,14 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
       while (copied < st.st_size)
         {
           off_t tocopy = st.st_size - copied;
-          ssize_t n = sendfile (dfd, sfd, NULL, tocopy > SIZE_MAX ? SIZE_MAX : (size_t) tocopy);
+          ssize_t n = TEMP_FAILURE_RETRY (sendfile (dfd, sfd, NULL, tocopy > SIZE_MAX ? SIZE_MAX : (size_t) tocopy));
           if (n < 0)
             {
               /* On failure, fallback to the read/write loop.  */
               ret = copy_fd_to_fd (sfd, dfd, buf, buf_size);
               if (ret < 0)
                 goto exit;
+              break;
             }
           copied += n;
 	}
