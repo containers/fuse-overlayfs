@@ -33,5 +33,5 @@ On Fedora: `dnf install fuse3-devel`
 Static Build:
 =======================================================
 
-`buildah bud -t ./Dockerfile.static .`
+`buildah bud -t fuse-overlayfs -f ./Dockerfile.static .`
 
