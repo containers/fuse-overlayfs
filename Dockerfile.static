@@ -1,4 +1,4 @@
-FROM fedora:latest
+FROM fedora:30
 WORKDIR /build
 RUN dnf update -y && \
     dnf install -y git make automake autoconf gcc glibc-static meson ninja-build
