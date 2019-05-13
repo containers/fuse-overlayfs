@@ -1,4 +1,4 @@
-FROM docker.io/fedora:latest
+FROM registry.fedoraproject.org/fedora:latest
 WORKDIR /build
 RUN dnf update -y && \
     dnf install -y git make automake autoconf gcc glibc-static meson ninja-build clang
