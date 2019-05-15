@@ -1313,7 +1313,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
             {
               int saved_errno = errno;
 
-              if (errno == ENOENT)
+              if (errno == ENOENT || errno == ENOTDIR)
                 {
                   if (node)
                     continue;
@@ -1323,7 +1323,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                     return NULL;
 
                   ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
-                  if (ret < 0 && errno != ENOENT)
+                  if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
                     return NULL;
                   if (ret == 0)
                     {
