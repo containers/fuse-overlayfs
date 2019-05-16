@@ -29,7 +29,7 @@ script:
   - ./configure || travis_terminate 1;
   - make -j $(nproc) || travis_terminate 1;
   - sudo make -j install; sudo cp fuse-overlayfs /sbin || travis_terminate 1;
-  - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
-  - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
+  - (cd /unionmount-testsuite; sudo unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
+  - (cd /unionmount-testsuite; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
   - sudo tests/fedora-installs.sh || travis_terminate 1;
   - sudo tests/unlink.sh || travis_terminate 1;
