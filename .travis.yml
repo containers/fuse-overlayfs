@@ -31,5 +31,5 @@ script:
   - sudo make -j install; sudo cp fuse-overlayfs /sbin || travis_terminate 1;
   - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
   - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
-  - sudo tests/fedora-installs.sh
-  - sudo tests/unlink.sh
+  - sudo tests/fedora-installs.sh || travis_terminate 1;
+  - sudo tests/unlink.sh || travis_terminate 1;
