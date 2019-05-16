@@ -1,8 +1,10 @@
 services:
   - docker
+env:
+  - GOPATH=$HOME/go GOROOT=/usr/local/go GO=/usr/local/go/bin/go
 language: c
 sudo: required
-dist: trusty
+dist: xenial
 addons:
   apt:
     packages:
@@ -17,19 +19,27 @@ addons:
       - python3.5
       - g++
       - python3-setuptools
+      - libdevmapper-dev
+      - btrfs-tools
+      - go-md2man
 before_install:
   - docker pull fedora &
+  - (wget https://dl.google.com/go/go1.10.8.linux-amd64.tar.gz && tar xf go1.10.8.linux-amd64.tar.gz && sudo mv go /usr/local)
   - sudo mkdir -p /lower /upper /mnt
   - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
   - (git clone git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
   - (git clone https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
+  - (git clone https://github.com/sstephenson/bats.git; cd bats; sudo ./install.sh /usr/local)
+  - (go get github.com/containers/storage; cd $GOPATH/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := exclude_graphdriver_devicemapper exclude_graphdriver_btrfs|' Makefile; make GO=$GO containers-storage)
   - (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.2.4/fuse-3.2.4.tar.xz; tar xf fuse-3.2.4.tar.xz; cd fuse-3.2.4; mkdir build; cd build; meson .. --prefix /usr && ninja && sudo ninja install)
 script:
   - ./autogen.sh || travis_terminate 1;
   - ./configure || travis_terminate 1;
   - make -j $(nproc) || travis_terminate 1;
   - sudo make -j install; sudo cp fuse-overlayfs /sbin || travis_terminate 1;
-  - (cd /unionmount-testsuite; sudo ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
-  - (cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 sudo -E ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
-  - sudo tests/fedora-installs.sh
-  - sudo tests/unlink.sh
+  - (cd /unionmount-testsuite; sudo unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
+  - (cd /unionmount-testsuite; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
+  - sudo tests/fedora-installs.sh || travis_terminate 1;
+  - sudo tests/unlink.sh || travis_terminate 1;
+  - (cd $GOPATH/src/github.com/containers/storage/tests; sudo STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
+  - (cd $GOPATH/src/github.com/containers/storage/tests; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
