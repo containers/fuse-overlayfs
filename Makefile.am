@@ -4,14 +4,14 @@ bin_PROGRAMS = fuse-overlayfs
 
 ACLOCAL_AMFLAGS = -Im4
 
-EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse-overlayfs.1.md utils.h NEWS
+EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse-overlayfs.1.md utils.h plugin.h NEWS
 
 CLEANFILES = fuse-overlayfs.1
 
 fuse_overlayfs_CFLAGS = -I . -I $(abs_srcdir)/lib $(FUSE_CFLAGS)
 fuse_overlayfs_LDFLAGS =
 fuse_overlayfs_LDADD = lib/libgnu.a $(FUSE_LIBS)
-fuse_overlayfs_SOURCES = main.c
+fuse_overlayfs_SOURCES = main.c plugin.c
 
 WD := $(shell pwd)
 

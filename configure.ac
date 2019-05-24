@@ -54,6 +54,7 @@ LDFLAGS=$old_LDFLAGS
 
 AC_DEFINE_UNQUOTED([HAVE_FUSE_CACHE_READDIR], $cache_readdir, [Define if libfuse is available])
 
+AC_SEARCH_LIBS([dlopen], [dl], [], [AC_MSG_ERROR([unable to find dlopen()])])
 
 AC_FUNC_ERROR_AT_LINE
 AC_FUNC_MALLOC

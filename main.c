@@ -79,6 +79,8 @@
 
 #include <pthread.h>
 
+#include <plugin.h>
+
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
   (__extension__                                                              \
@@ -188,6 +190,9 @@ struct ovl_layer
   char *path;
   int fd;
   bool low;
+
+  struct ovl_plugin *plugin;
+  void *plugin_opaque;
 };
 
 struct ovl_mapping
@@ -239,6 +244,7 @@ struct ovl_data
   char *gid_str;
   struct ovl_mapping *uid_mappings;
   struct ovl_mapping *gid_mappings;
+  char *plugins;
   char *mountpoint;
   char *lowerdir;
   char *context;
@@ -254,6 +260,7 @@ struct ovl_data
   struct ovl_node *root;
   char *timeout_str;
   double timeout;
+
   int threaded;
   int fsync;
   int fast_ino_check;
@@ -263,6 +270,8 @@ struct ovl_data
   /* current uid/gid*/
   uid_t uid;
   uid_t gid;
+
+  struct ovl_plugin_context *plugins_ctx;
 };
 
 static double
@@ -298,6 +307,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, writeback), 1},
   {"noxattrs=%d",
    offsetof (struct ovl_data, disable_xattrs), 1},
+  {"plugins=%s",
+   offsetof (struct ovl_data, plugins), 0},
   FUSE_OPT_END
 };
 
@@ -1498,7 +1509,12 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
     {
       int fd;
       cleanup_dir DIR *dp = NULL;
-      cleanup_close int cleanup_fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_DIRECTORY));
+      cleanup_close int cleanup_fd = -1;
+
+      if (it->plugin && it->plugin->fetch (it->plugin_opaque, n->parent ? n->parent->path : ".", name, LAYER_MODE_DIRECTORY) < 0)
+        return NULL;
+
+      cleanup_fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_DIRECTORY));
       if (cleanup_fd < 0)
         continue;
 
@@ -1532,6 +1548,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
             continue;
 
+          if (it->plugin && it->plugin->fetch (it->plugin_opaque, path, dent->d_name, LAYER_MODE_METADATA) < 0)
+            return NULL;
+
           child = hash_lookup (n->children, &key);
           if (child)
             {
@@ -1552,6 +1571,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           strconcat3 (whiteout_path, PATH_MAX, ".wh.", dent->d_name, NULL);
 
           strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
+
+          if (it->plugin && it->plugin->fetch (it->plugin_opaque, path, whiteout_path, LAYER_MODE_METADATA) < 0)
+            return NULL;
 
           ret = file_exists_at (fd, whiteout_path);
           if (ret < 0 && errno != ENOENT)
@@ -1653,7 +1675,7 @@ cleanup_layerp (struct ovl_layer **p)
 #define cleanup_layer __attribute__((cleanup (cleanup_layerp)))
 
 static struct ovl_layer *
-read_dirs (char *path, bool low, struct ovl_layer *layers)
+read_dirs (struct ovl_plugin_context *plugins_ctx, const char *workdir, int workdirfd, char *path, bool low, struct ovl_layer *layers)
 {
   char *saveptr = NULL, *it;
   struct ovl_layer *last;
@@ -1672,6 +1694,9 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
 
   for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
+      /* Used to initialize the plugin.  */
+      char *name, *data;
+      char *it_path = it;
       cleanup_layer struct ovl_layer *l = NULL;
 
       l = calloc (1, sizeof (*l));
@@ -1679,13 +1704,57 @@ read_dirs (char *path, bool low, struct ovl_layer *layers)
         return NULL;
       l->fd = -1;
 
-      l->path = realpath (it, NULL);
+      if (it[0] == '/' && it[1] == '/')
+        {
+          char *plugin_data_sep, *plugin_sep;
+
+          plugin_sep = strchr (it + 2, '/');
+          if (! plugin_sep)
+            {
+              fprintf (stderr, "invalid separator for plugin\n");
+              return NULL;
+            }
+
+          *plugin_sep = '\0';
+
+          name = it + 2;
+          data = plugin_sep + 1;
+
+          plugin_data_sep = strchr (data, '/');
+          if (! plugin_data_sep)
+            {
+              fprintf (stderr, "invalid separator for plugin\n");
+              return NULL;
+            }
+
+          *plugin_data_sep = '\0';
+          path = plugin_data_sep + 1;
+
+          l->plugin = plugin_find (plugins_ctx, name);
+          if (! l->plugin)
+            {
+              fprintf (stderr, "cannot find plugin %s\n", name);
+              return NULL;
+            }
+        }
+
+      l->path = realpath (it_path, NULL);
       if (l->path == NULL)
         return NULL;
 
       l->fd = open (l->path, O_DIRECTORY);
       if (l->fd < 0)
         return NULL;
+
+      if (l->plugin)
+        {
+          l->plugin_opaque = l->plugin->init (data, workdir, workdirfd, it_path, l->fd);
+          if (! l->plugin_opaque)
+            {
+              fprintf (stderr, "cannot initialize plugin %s\n", name);
+              return NULL;
+            }
+        }
 
       l->low = low;
       if (low)
@@ -1746,6 +1815,9 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
           strconcat3 (path, PATH_MAX, pnode->path, "/", name);
 
+          if (it->plugin && it->plugin->fetch (it->plugin_opaque, pnode->path, name, LAYER_MODE_METADATA) < 0)
+            return NULL;
+
           ret = TEMP_FAILURE_RETRY (fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0)
             {
@@ -1755,6 +1827,11 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                 {
                   if (node)
                     continue;
+
+                  strconcat3 (whpath, PATH_MAX, "/.wh.", name, NULL);
+
+                  if (it->plugin && it->plugin->fetch (it->plugin_opaque, pnode->path, whpath, LAYER_MODE_METADATA) < 0)
+                    return NULL;
 
                   strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
 
@@ -1786,7 +1863,13 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               continue;
             }
 
+          strconcat3 (whpath, PATH_MAX, "/.wh.", name, NULL);
+
+          if (it->plugin && it->plugin->fetch (it->plugin_opaque, pnode->path, whpath, LAYER_MODE_METADATA) < 0)
+            return NULL;
+
           strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
+
           ret = file_exists_at (it->fd, whpath);
           if (ret < 0 && errno != ENOENT)
             return NULL;
@@ -3244,11 +3327,15 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       return ret;
     }
 
+  if (n->layer->plugin && n->layer->plugin->fetch (n->layer->plugin_opaque, n->parent ? n->parent->path : ".", n->name, LAYER_MODE_FILE) < 0)
+    return -1;
+
   /* readonly, we can use both lowerdir and upperdir.  */
   if (readonly)
     {
       if (retnode)
         *retnode = n;
+
       return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
     }
   else
@@ -4879,6 +4966,27 @@ set_limits ()
     error (EXIT_FAILURE, errno, "cannot set process rlimit");
 }
 
+static struct ovl_plugin_context *
+load_plugins (const char *plugins)
+{
+  char *saveptr = NULL, *it;
+  cleanup_free char *buf = NULL;
+  struct ovl_plugin_context *ctx;
+
+  ctx = calloc (1, sizeof (*ctx));
+  if (ctx == NULL)
+    error (EXIT_FAILURE, errno, "cannot allocate context");
+
+  buf = strdup (plugins);
+  if (buf == NULL)
+    error (EXIT_FAILURE, errno, "cannot allocate memory");
+
+  for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
+    plugin_load (ctx, it);
+
+  return ctx;
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -4898,6 +5006,7 @@ main (int argc, char *argv[])
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
                         .writeback = 1,
+                        .plugins = NULL,
   };
   struct fuse_loop_config fuse_conf = {
                                        .clone_fd = 1,
@@ -4971,6 +5080,7 @@ main (int argc, char *argv[])
       fprintf (stderr, "workdir=%s\n", lo.workdir);
       fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
       fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
+      fprintf (stderr, "plugins=%s\n", lo.plugins);
     }
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
@@ -4984,13 +5094,16 @@ main (int argc, char *argv[])
         error (EXIT_FAILURE, errno, "cannot convert %s", lo.timeout_str);
     }
 
-  layers = read_dirs (lo.lowerdir, true, NULL);
+  if (lo.plugins)
+    lo.plugins_ctx = load_plugins (lo.plugins);
+
+  layers = read_dirs (lo.plugins_ctx, lo.workdir, lo.workdir_fd, lo.lowerdir, true, NULL);
   if (layers == NULL)
     {
       error (EXIT_FAILURE, errno, "cannot read lower dirs");
     }
 
-  tmp_layer = read_dirs (lo.upperdir, false, layers);
+  tmp_layer = read_dirs (lo.plugins_ctx, lo.workdir, lo.workdir_fd, lo.upperdir, false, layers);
   if (tmp_layer == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
   lo.layers = layers = tmp_layer;
@@ -5066,6 +5179,10 @@ err_out1:
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);
+
+  for (tmp_layer = lo.layers; tmp_layer; tmp_layer = tmp_layer->next)
+    if (tmp_layer->plugin)
+      tmp_layer->plugin->release (tmp_layer->plugin_opaque);
 
   close (lo.workdir_fd);
 
