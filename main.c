@@ -622,13 +622,13 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
       if (syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
                    newpath, RENAME_WHITEOUT) < 0)
         {
-          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
-            return -1;
           if (node->parent)
             {
               if (create_whiteout (lo, node->parent, node->name, false, false) < 0)
                 return -1;
             }
+          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
+            return -1;
         }
     }
   else
