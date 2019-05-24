@@ -949,10 +949,6 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           if (fstat (fd, &st) == 0)
             ret->ino = st.st_ino;
 
-          close (fd);
-          fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
-          if (fd < 0)
-            continue;
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
             {
