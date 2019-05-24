@@ -1084,7 +1084,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
       if (dp == NULL)
         continue;
 
-      cleanup_fd = -1;  /* It is not owned by dp.  */
+      cleanup_fd = -1;  /* It is now owned by dp.  */
 
       fd = dirfd (dp);
       for (;;)
