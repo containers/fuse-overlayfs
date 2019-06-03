@@ -3767,8 +3767,8 @@ ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *
 }
 
 static void
-ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
-           struct fuse_file_info *fi, unsigned flags,
+ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
+           struct fuse_file_info *fi, unsigned int flags,
            const void *in_buf, size_t in_bufsz, size_t out_bufsz)
 {
   struct ovl_data *lo = ovl_data (req);
