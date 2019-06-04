@@ -112,9 +112,6 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 # define RENAME_WHITEOUT (1 << 2)
 #endif
 
-#define ATTR_TIMEOUT 1000000000.0
-#define ENTRY_TIMEOUT 1000000000.0
-
 #define XATTR_PREFIX "user.fuseoverlayfs."
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
@@ -197,7 +194,15 @@ struct ovl_data
   struct ovl_layer *layers;
 
   struct ovl_node *root;
+  char *timeout_str;
+  double timeout;
 };
+
+static double
+get_timeout (struct ovl_data *lo)
+{
+  return lo->timeout;
+}
 
 static const struct fuse_opt ovl_opts[] = {
   {"redirect_dir=%s",
@@ -214,6 +219,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, uid_str), 0},
   {"gidmapping=%s",
    offsetof (struct ovl_data, gid_str), 0},
+  {"timeout=%s",
+   offsetof (struct ovl_data, timeout_str), 0},
   FUSE_OPT_END
 };
 
@@ -1441,8 +1448,8 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
 
   e.ino = NODE_TO_INODE (node);
   node->lookups++;
-  e.attr_timeout = ATTR_TIMEOUT;
-  e.entry_timeout = ENTRY_TIMEOUT;
+  e.attr_timeout = get_timeout (lo);
+  e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
 }
 
@@ -1620,6 +1627,7 @@ static void
 ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 	       off_t offset, struct fuse_file_info *fi, int plus)
 {
+  struct ovl_data *lo = ovl_data (req);
   struct ovl_dirp *d = ovl_dirp (fi);
   size_t remaining = size;
   char *p;
@@ -1668,8 +1676,8 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             struct fuse_entry_param e;
 
             memset (&e, 0, sizeof (e));
-            e.attr_timeout = ATTR_TIMEOUT;
-            e.entry_timeout = ENTRY_TIMEOUT;
+            e.attr_timeout = get_timeout (lo);
+            e.entry_timeout = get_timeout (lo);
             e.ino = NODE_TO_INODE (node);
             memcpy (&e.attr, &st, sizeof (st));
 
@@ -2638,6 +2646,7 @@ ovl_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 static int
 do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node)
 {
+  struct ovl_data *lo = ovl_data (req);
   int err = 0;
 
   memset (e, 0, sizeof (*e));
@@ -2647,8 +2656,8 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node)
     return err;
 
   e->ino = (fuse_ino_t) node;
-  e->attr_timeout = ATTR_TIMEOUT;
-  e->entry_timeout = ENTRY_TIMEOUT;
+  e->attr_timeout = get_timeout (lo);
+  e->entry_timeout = get_timeout (lo);
 
   return 0;
 }
@@ -2730,7 +2739,7 @@ ovl_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       return;
     }
 
-  fuse_reply_attr (req, &e.attr, ENTRY_TIMEOUT);
+  fuse_reply_attr (req, &e.attr, get_timeout (lo));
 }
 
 static void
@@ -2854,7 +2863,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       return;
     }
 
-  fuse_reply_attr (req, &e.attr, ENTRY_TIMEOUT);
+  fuse_reply_attr (req, &e.attr, get_timeout (lo));
 }
 
 static void
@@ -2983,8 +2992,8 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
 
   e.ino = NODE_TO_INODE (node);
   node->lookups++;
-  e.attr_timeout = ATTR_TIMEOUT;
-  e.entry_timeout = ENTRY_TIMEOUT;
+  e.attr_timeout = get_timeout (lo);
+  e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
 }
 
@@ -3086,8 +3095,8 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
 
   e.ino = NODE_TO_INODE (node);
   node->lookups++;
-  e.attr_timeout = ATTR_TIMEOUT;
-  e.entry_timeout = ENTRY_TIMEOUT;
+  e.attr_timeout = get_timeout (lo);
+  e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
 }
 
@@ -3638,8 +3647,8 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     }
 
   e.ino = NODE_TO_INODE (node);
-  e.attr_timeout = ATTR_TIMEOUT;
-  e.entry_timeout = ENTRY_TIMEOUT;
+  e.attr_timeout = get_timeout (lo);
+  e.entry_timeout = get_timeout (lo);
   node->lookups++;
   fuse_reply_entry (req, &e);
 }
@@ -3730,8 +3739,8 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     }
 
   e.ino = NODE_TO_INODE (node);
-  e.attr_timeout = ATTR_TIMEOUT;
-  e.entry_timeout = ENTRY_TIMEOUT;
+  e.attr_timeout = get_timeout (lo);
+  e.entry_timeout = get_timeout (lo);
   node->lookups++;
   fuse_reply_entry (req, &e);
 }
@@ -3954,6 +3963,8 @@ main (int argc, char *argv[])
                         .lowerdir = NULL,
                         .redirect_dir = NULL,
                         .mountpoint = NULL,
+                        .timeout = 1000000000.0,
+                        .timeout_str = NULL,
   };
   int ret = -1;
   cleanup_layer struct ovl_layer *layers = NULL;
@@ -4021,6 +4032,14 @@ main (int argc, char *argv[])
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
   lo.gid_mappings = lo.gid_str ? read_mappings (lo.gid_str) : NULL;
+
+  errno = 0;
+  if (lo.timeout_str)
+    {
+      lo.timeout = strtod (lo.timeout_str, NULL);
+      if (errno == ERANGE)
+        error (EXIT_FAILURE, errno, "cannot convert %s", lo.timeout_str);
+    }
 
   layers = read_dirs (lo.lowerdir, true, NULL);
   if (layers == NULL)
