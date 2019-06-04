@@ -3092,22 +3092,6 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
 }
 
 static void
-ovl_flock (fuse_req_t req, fuse_ino_t ino,
-          struct fuse_file_info *fi, int op)
-{
-  int ret, fd;
-
-  if (ovl_debug (req))
-    fprintf (stderr, "ovl_flock(ino=%" PRIu64 "s, op=%d)\n", ino, op);
-
-  fd = fi->fh;
-
-  ret = flock (fd, op);
-
-  fuse_reply_err (req, ret == 0 ? 0 : errno);
-}
-
-static void
 ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
                      fuse_ino_t newparent, const char *newname,
                      unsigned int flags)
@@ -3866,7 +3850,6 @@ static struct fuse_lowlevel_ops ovl_oper =
    .mknod = ovl_mknod,
    .link = ovl_link,
    .fsync = ovl_fsync,
-   .flock = ovl_flock,
    .ioctl = ovl_ioctl,
   };
 
