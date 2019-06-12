@@ -40,7 +40,6 @@ script:
   - (cd /unionmount-testsuite; sudo unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
   - (cd /unionmount-testsuite; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 unshare -m ./run --ov --fuse=fuse-overlayfs --xdev) || travis_terminate 1;
   - sudo tests/fedora-installs.sh || travis_terminate 1;
-  - sudo tests/fedora-rm.sh || travis_terminate 1;
   - sudo tests/unlink.sh || travis_terminate 1;
   - (cd $GOPATH/src/github.com/containers/storage/tests; sudo STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
   - (cd $GOPATH/src/github.com/containers/storage/tests; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
