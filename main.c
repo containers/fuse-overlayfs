@@ -637,11 +637,26 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
         {
           if (node->parent)
             {
-              if (create_whiteout (lo, node->parent, node->name, false, false) < 0)
+              /* If we are here, it means we have no permissions to use mknod.  Also
+                 since the file is not yet moved, creating a whiteout would fail on
+                 the mknodat call.  */
+              if (create_whiteout (lo, node->parent, node->name, true, false) < 0)
                 return -1;
             }
           if (renameat (upper_layer_fd (lo), node->path, lo->workdir_fd, newpath) < 0)
-            return -1;
+            {
+              if (node->parent)
+                {
+                  cleanup_free char *whpath = NULL;
+
+                  ret = asprintf (&whpath, "%s/.wh.%s", node->parent->path, node->name);
+                  /* If the rename failed, then try to delete the whiteout file we
+                     created earlier.  */
+                  if (ret == 0)
+                    unlinkat (upper_layer_fd (lo), whpath, 0);
+                }
+              return -1;
+            }
         }
     }
   else
