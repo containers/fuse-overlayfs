@@ -2787,7 +2787,6 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node;
   struct fuse_entry_param e;
-  struct stat old_st;
   struct timespec times[2];
   uid_t uid;
   gid_t gid;
@@ -2811,12 +2810,6 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     }
 
   dirfd = node_dirfd (node);
-
-  if (TEMP_FAILURE_RETRY (fstatat (dirfd, node->path, &old_st, AT_SYMLINK_NOFOLLOW)) < 0)
-    {
-      fuse_reply_err (req, errno);
-      return;
-    }
 
   if (to_set & FUSE_SET_ATTR_CTIME)
     {
@@ -2880,14 +2873,14 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
         }
     }
 
-  uid = old_st.st_uid;
-  gid = old_st.st_gid;
+  uid = -1;
+  gid = -1;
   if (to_set & FUSE_SET_ATTR_UID)
     uid = get_uid (lo, attr->st_uid);
   if (to_set & FUSE_SET_ATTR_GID)
     gid = get_gid (lo, attr->st_gid);
 
-  if (uid != old_st.st_uid || gid != old_st.st_gid)
+  if (uid != -1 || gid != -1)
     {
       if (fchownat (dirfd, node->path, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
         {
