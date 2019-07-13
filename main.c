@@ -375,7 +375,6 @@ static void
 ovl_init (void *userdata, struct fuse_conn_info *conn)
 {
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_MOVE;
-  conn->want &= ~FUSE_CAP_PARALLEL_DIROPS;
 }
 
 static struct ovl_layer *
