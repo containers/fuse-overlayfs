@@ -263,6 +263,52 @@ get_next_wd_counter ()
   return counter++;
 }
 
+static int
+strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3)
+{
+  size_t t;
+  char *current = dest;
+
+  size--;
+
+  if (s1)
+    {
+      t = strlen (s1);
+      if (t > size)
+        t = size;
+
+      memcpy (current, s1, t);
+      current += t;
+
+      size -= t;
+    }
+  if (s2)
+    {
+      t = strlen (s2);
+      if (t > size)
+        t = size;
+
+      memcpy (current, s2, t);
+      current += t;
+
+      size -= t;
+    }
+  if (s3)
+    {
+      t = strlen (s3);
+      if (t > size)
+        t = size;
+
+      memcpy (current, s3, t);
+      current += t;
+
+      size -= t;
+    }
+  *current = '\0';
+
+  return current - dest;
+}
+
 static struct ovl_mapping *
 read_mappings (const char *str)
 {
@@ -470,7 +516,7 @@ is_directory_opaque (int dirfd, const char *path)
         {
           char whiteout_opq_path[PATH_MAX];
 
-          sprintf (whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path);
+          strconcat3 (whiteout_opq_path, PATH_MAX, path, "/" OPAQUE_WHITEOUT, NULL);
 
           if (file_exists_at (dirfd, whiteout_opq_path) == 0)
             return 1;
@@ -497,7 +543,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       struct ovl_layer *l;
       bool found = false;
 
-      sprintf (path, "%s/%s", parent->path, name);
+      strconcat3 (path, PATH_MAX, parent->path, "/", name);
 
       for (l = get_lower_layers (lo); l; l = l->next)
         {
@@ -517,7 +563,8 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
     {
       char whiteout_path[PATH_MAX];
 
-      sprintf (whiteout_path, "%s/%s", parent->path, name);
+      strconcat3 (whiteout_path, PATH_MAX, parent->path, "/", name);
+
       ret = mknodat (get_upper_layer (lo)->fd, whiteout_path, S_IFCHR|0700, makedev (0, 0));
       if (ret == 0)
         return 0;
@@ -529,7 +576,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       can_mknod = false;
     }
 
-  sprintf (whiteout_wh_path, "%s/.wh.%s", parent->path, name);
+  strconcat3 (whiteout_wh_path, PATH_MAX, parent->path, "/.wh.", name);
 
   fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_wh_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
   if (fd < 0 && errno != EEXIST)
@@ -558,7 +605,7 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
     {
       char whiteout_path[PATH_MAX];
 
-      sprintf (whiteout_path, "%s/%s", parent->path, name);
+      strconcat3 (whiteout_path, PATH_MAX, parent->path, "/", name);
 
       if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
           && (st.st_mode & S_IFMT) == S_IFCHR
@@ -576,7 +623,7 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
     {
       char whiteout_path[PATH_MAX];
 
-      sprintf (whiteout_path, ".wh.%s", name);
+      strconcat3 (whiteout_path, PATH_MAX, ".wh.", name, NULL);
 
       if (unlinkat (dirfd, whiteout_path, 0) < 0 && errno != ENOENT)
         return -1;
@@ -585,7 +632,7 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
     {
       char whiteout_path[PATH_MAX];
 
-      sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
+      strconcat3 (whiteout_path, PATH_MAX, parent->path, "/.wh.", name);
 
       if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0 && errno != ENOENT)
         return -1;
@@ -630,7 +677,7 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
                 {
                   char whpath[PATH_MAX];
 
-                  sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
+                  strconcat3 (whpath, PATH_MAX, node->parent->path, "/.wh.", node->name);
                   unlinkat (get_upper_layer (lo)->fd, whpath, 0);
                 }
               return -1;
@@ -1129,9 +1176,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
-          sprintf (whiteout_path, ".wh.%s", dent->d_name);
+          strconcat3 (whiteout_path, PATH_MAX, ".wh.", dent->d_name, NULL);
 
-          sprintf (node_path, "%s/%s", n->path, dent->d_name);
+          strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
 
           ret = file_exists_at (fd, whiteout_path);
           if (ret < 0 && errno != ENOENT)
@@ -1314,7 +1361,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           char whpath[PATH_MAX];
           const char *wh_name;
 
-          sprintf (path, "%s/%s", pnode->path, name);
+          strconcat3 (path, PATH_MAX, pnode->path, "/", name);
 
           ret = TEMP_FAILURE_RETRY (fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0)
@@ -1326,7 +1373,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                   if (node)
                     continue;
 
-                  sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+                  strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
 
                   ret = file_exists_at (it->fd, whpath);
                   if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
@@ -1356,7 +1403,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               continue;
             }
 
-          sprintf (whpath, "%s/.wh.%s", pnode->path, name);
+          strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
 
           ret = file_exists_at (it->fd, whpath);
           if (ret < 0 && errno != ENOENT)
@@ -1599,8 +1646,8 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                       n = load_dir (lo, n, n->layer, n->path, n->name);
                       if (n == NULL)
                         return -1;
-                      if (sprintf (c, "%s/%s", from, n->name) < 0)
-                        return -1;
+
+                      strconcat3 (c, PATH_MAX, from, "/", n->name);
 
                       if (create_missing_whiteouts (lo, n, c) < 0)
                         return -1;
@@ -2137,7 +2184,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
     {
       char whpath[PATH_MAX];
 
-      sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
+      strconcat3 (whpath, PATH_MAX, node->parent->path, "/.wh.", node->name);
 
       if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
         goto exit;
