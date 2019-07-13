@@ -312,6 +312,22 @@ strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char 
   return current - dest;
 }
 
+static void
+check_can_mknod (struct ovl_data *lo)
+{
+  int ret;
+  char path[PATH_MAX];
+
+  sprintf (path, "%lu", get_next_wd_counter ());
+
+  ret = mknodat (lo->workdir_fd, path, S_IFCHR|0700, makedev (0, 0));
+  if (ret == 0)
+    unlinkat (lo->workdir_fd, path, 0);
+  if (ret < 0 && errno == EPERM)
+    can_mknod = false;
+}
+
+
 static struct ovl_mapping *
 read_mappings (const char *str)
 {
@@ -4056,6 +4072,7 @@ main (int argc, char *argv[])
     }
 
   set_limits ();
+  check_can_mknod (&lo);
 
   if (lo.debug)
     {
