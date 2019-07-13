@@ -1050,7 +1050,8 @@ get_whiteout_name (const char *name, struct stat *st)
 {
   if (has_prefix (name, ".wh."))
     return name + 4;
-  if ((st->st_mode & S_IFMT) == S_IFCHR
+  if (st
+      && (st->st_mode & S_IFMT) == S_IFCHR
       && major (st->st_rdev) == 0
       && minor (st->st_rdev) == 0)
     return name;
@@ -1061,7 +1062,6 @@ static struct ovl_node *
 load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char *path, char *name)
 {
   struct dirent *dent;
-  struct stat st;
   struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
 
   if (!n)
@@ -1093,7 +1093,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         {
           int ret;
           struct ovl_node key;
-          const char *wh;
           struct ovl_node *child = NULL;
           char node_path[PATH_MAX];
           char whiteout_path[PATH_MAX];
@@ -1112,9 +1111,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
           if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
             continue;
-
-          if (TEMP_FAILURE_RETRY (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW)) < 0)
-              return NULL;
 
           child = hash_lookup (n->children, &key);
           if (child)
@@ -1152,7 +1148,24 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
             }
           else
             {
-              wh = get_whiteout_name (dent->d_name, &st);
+              const char *wh = NULL;
+              bool dirp = dent->d_type == DT_DIR;
+
+              if ((dent->d_type != DT_CHR) && (dent->d_type != DT_UNKNOWN))
+                wh = get_whiteout_name (dent->d_name, NULL);
+              else
+                {
+                  /* A stat is required either if the type is not known, or if it is a character device as it could be
+                     a whiteout file.  */
+                  struct stat st;
+
+                  if (TEMP_FAILURE_RETRY (fstatat (fd, dent->d_name, &st, AT_SYMLINK_NOFOLLOW)) < 0)
+                    return NULL;
+
+                  dirp = st.st_mode & S_IFDIR;
+                  wh = get_whiteout_name (dent->d_name, &st);
+                }
+
               if (wh)
                 {
                   child = make_whiteout_node (node_path, wh);
@@ -1164,7 +1177,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
               else
                 {
-                  bool dirp = st.st_mode & S_IFDIR;
 
                   child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n);
                   if (child == NULL)
