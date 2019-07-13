@@ -463,10 +463,9 @@ is_directory_opaque (int dirfd, const char *path)
       if (saved_errno == ENOTSUP || saved_errno == ENODATA)
         {
           struct stat st;
-          cleanup_free char *whiteout_opq_path = NULL;
+          char whiteout_opq_path[PATH_MAX];
 
-          if (asprintf (&whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path) < 0)
-            return -1;
+          sprintf (whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path);
 
           if (fstatat (dirfd, whiteout_opq_path, &st, AT_SYMLINK_NOFOLLOW) == 0)
             return 1;
@@ -482,20 +481,18 @@ is_directory_opaque (int dirfd, const char *path)
 static int
 create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod, bool force_create)
 {
-  cleanup_free char *whiteout_wh_path = NULL;
+  char whiteout_wh_path[PATH_MAX];
   static bool can_mknod = true;
   cleanup_close int fd = -1;
   int ret;
 
   if (! force_create)
     {
-      cleanup_free char *path = NULL;
+      char path[PATH_MAX];
       struct ovl_layer *l;
       bool found = false;
 
-      ret = asprintf (&path, "%s/%s", parent->path, name);
-      if (ret < 0)
-        return ret;
+      sprintf (path, "%s/%s", parent->path, name);
 
       for (l = get_lower_layers (lo); l; l = l->next)
         {
@@ -515,11 +512,9 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
 
   if (!disable_ovl_whiteout && !skip_mknod && can_mknod)
     {
-      cleanup_free char *whiteout_path = NULL;
+      char whiteout_path[PATH_MAX];
 
-      ret = asprintf (&whiteout_path, "%s/%s", parent->path, name);
-      if (ret < 0)
-        return ret;
+      sprintf (whiteout_path, "%s/%s", parent->path, name);
       ret = mknodat (get_upper_layer (lo)->fd, whiteout_path, S_IFCHR|0700, makedev (0, 0));
       if (ret == 0)
         return 0;
@@ -531,9 +526,8 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       can_mknod = false;
     }
 
-  ret = asprintf (&whiteout_wh_path, "%s/.wh.%s", parent->path, name);
-  if (ret < 0)
-    return ret;
+  sprintf (whiteout_wh_path, "%s/.wh.%s", parent->path, name);
+
   fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, whiteout_wh_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
   if (fd < 0 && errno != EEXIST)
     return -1;
@@ -559,12 +553,9 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
     }
   else
     {
-      cleanup_free char *whiteout_path = NULL;
-      int ret;
+      char whiteout_path[PATH_MAX];
 
-      ret = asprintf (&whiteout_path, "%s/%s", parent->path, name);
-      if (ret < 0)
-        return ret;
+      sprintf (whiteout_path, "%s/%s", parent->path, name);
 
       if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
           && (st.st_mode & S_IFMT) == S_IFCHR
@@ -580,24 +571,18 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
 
   if (dirfd >= 0)
     {
-      cleanup_free char *whiteout_path = NULL;
-      int ret;
+      char whiteout_path[PATH_MAX];
 
-      ret = asprintf (&whiteout_path, ".wh.%s", name);
-      if (ret < 0)
-        return ret;
+      sprintf (whiteout_path, ".wh.%s", name);
 
       if (unlinkat (dirfd, whiteout_path, 0) < 0 && errno != ENOENT)
         return -1;
     }
   else
     {
-      cleanup_free char *whiteout_path = NULL;
-      int ret;
+      char whiteout_path[PATH_MAX];
 
-      ret = asprintf (&whiteout_path, "%s/.wh.%s", parent->path, name);
-      if (ret < 0)
-        return ret;
+      sprintf (whiteout_path, "%s/.wh.%s", parent->path, name);
 
       if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0 && errno != ENOENT)
         return -1;
@@ -609,7 +594,7 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
 static int
 hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
-  cleanup_free char *newpath = NULL;
+  char *newpath = NULL;
   int ret;
 
   ret = asprintf (&newpath, "%lu", get_next_wd_counter ());
@@ -640,13 +625,10 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
             {
               if (node->parent)
                 {
-                  cleanup_free char *whpath = NULL;
+                  char whpath[PATH_MAX];
 
-                  ret = asprintf (&whpath, "%s/.wh.%s", node->parent->path, node->name);
-                  /* If the rename failed, then try to delete the whiteout file we
-                     created earlier.  */
-                  if (ret == 0)
-                    unlinkat (get_upper_layer (lo)->fd, whpath, 0);
+                  sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
+                  unlinkat (get_upper_layer (lo)->fd, whpath, 0);
                 }
               return -1;
             }
@@ -1110,8 +1092,8 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           struct ovl_node key;
           const char *wh;
           struct ovl_node *child = NULL;
-          cleanup_free char *node_path = NULL;
-          cleanup_free char *whiteout_path = NULL;
+          char node_path[PATH_MAX];
+          char whiteout_path[PATH_MAX];
 
           errno = 0;
           dent = readdir (dp);
@@ -1148,13 +1130,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
-          ret = asprintf (&whiteout_path, ".wh.%s", dent->d_name);
-          if (ret < 0)
-            return NULL;
+          sprintf (whiteout_path, ".wh.%s", dent->d_name);
 
-          ret = asprintf (&node_path, "%s/%s", n->path, dent->d_name);
-          if (ret < 0)
-            return NULL;
+          sprintf (node_path, "%s/%s", n->path, dent->d_name);
 
           ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0 && errno != ENOENT)
@@ -1317,13 +1295,11 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
       for (it = lo->layers; it; it = it->next)
         {
-          cleanup_free char *path = NULL;
-          cleanup_free char *whpath = NULL;
+          char path[PATH_MAX];
+          char whpath[PATH_MAX];
           const char *wh_name;
 
-          ret = asprintf (&path, "%s/%s", pnode->path, name);
-          if (ret < 0)
-            return NULL;
+          sprintf (path, "%s/%s", pnode->path, name);
 
           ret = TEMP_FAILURE_RETRY (fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0)
@@ -1335,9 +1311,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                   if (node)
                     continue;
 
-                  ret = asprintf (&whpath, "%s/.wh.%s", pnode->path, name);
-                  if (ret < 0)
-                    return NULL;
+                  sprintf (whpath, "%s/.wh.%s", pnode->path, name);
 
                   ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
                   if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
@@ -1367,12 +1341,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               continue;
             }
 
-          if (whpath == NULL)
-            {
-              ret = asprintf (&whpath, "%s/.wh.%s", pnode->path, name);
-              if (ret < 0)
-                return NULL;
-            }
+          sprintf (whpath, "%s/.wh.%s", pnode->path, name);
 
           ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
           if (ret < 0 && errno != ENOENT)
@@ -1610,11 +1579,12 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                 {
                   if (node_dirp (n))
                     {
-                      cleanup_free char *c = NULL;
+                      char c[PATH_MAX];
+
                       n = load_dir (lo, n, n->layer, n->path, n->name);
                       if (n == NULL)
                         return -1;
-                      if (asprintf (&c, "%s/%s", from, n->name) < 0)
+                      if (sprintf (c, "%s/%s", from, n->name) < 0)
                         return -1;
 
                       if (create_missing_whiteouts (lo, n, c) < 0)
@@ -2150,11 +2120,10 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   if (node->parent)
     {
-      cleanup_free char *whpath = NULL;
+      char whpath[PATH_MAX];
 
-      ret = asprintf (&whpath, "%s/.wh.%s", node->parent->path, node->name);
-      if (ret < 0)
-        goto exit;
+      sprintf (whpath, "%s/.wh.%s", node->parent->path, node->name);
+
       if (unlinkat (get_upper_layer (lo)->fd, whpath, 0) < 0 && errno != ENOENT)
         goto exit;
     }
