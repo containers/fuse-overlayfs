@@ -230,6 +230,9 @@ static const struct fuse_opt ovl_opts[] = {
   FUSE_OPT_END
 };
 
+/* The current process has enough privileges to use mknod.  */
+static bool can_mknod = true;
+
 /* Kernel definitions.  */
 
 typedef unsigned char u8;
@@ -533,7 +536,6 @@ static int
 create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name, bool skip_mknod, bool force_create)
 {
   char whiteout_wh_path[PATH_MAX];
-  static bool can_mknod = true;
   cleanup_close int fd = -1;
   int ret;
 
@@ -590,30 +592,33 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
 {
   struct stat st;
 
-  if (dirfd >= 0)
+  if (can_mknod)
     {
-      if (TEMP_FAILURE_RETRY (fstatat (dirfd, name, &st, AT_SYMLINK_NOFOLLOW)) == 0
-          && (st.st_mode & S_IFMT) == S_IFCHR
-          && major (st.st_rdev) == 0
-          && minor (st.st_rdev) == 0)
+      if (dirfd >= 0)
         {
-          if (unlinkat (dirfd, name, 0) < 0)
-            return -1;
+          if (TEMP_FAILURE_RETRY (fstatat (dirfd, name, &st, AT_SYMLINK_NOFOLLOW)) == 0
+              && (st.st_mode & S_IFMT) == S_IFCHR
+              && major (st.st_rdev) == 0
+              && minor (st.st_rdev) == 0)
+            {
+              if (unlinkat (dirfd, name, 0) < 0)
+                return -1;
+            }
         }
-    }
-  else
-    {
-      char whiteout_path[PATH_MAX];
-
-      strconcat3 (whiteout_path, PATH_MAX, parent->path, "/", name);
-
-      if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
-          && (st.st_mode & S_IFMT) == S_IFCHR
-          && major (st.st_rdev) == 0
-          && minor (st.st_rdev) == 0)
+      else
         {
-          if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0)
-            return -1;
+          char whiteout_path[PATH_MAX];
+
+          strconcat3 (whiteout_path, PATH_MAX, parent->path, "/", name);
+
+          if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
+              && (st.st_mode & S_IFMT) == S_IFCHR
+              && major (st.st_rdev) == 0
+              && minor (st.st_rdev) == 0)
+            {
+              if (unlinkat (get_upper_layer (lo)->fd, whiteout_path, 0) < 0)
+                return -1;
+            }
         }
     }
 
