@@ -103,6 +103,12 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 }
 #endif
 
+static int
+file_exists_at (int dirfd, const char *pathname)
+{
+  return faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
+}
+
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
@@ -462,12 +468,11 @@ is_directory_opaque (int dirfd, const char *path)
     {
       if (saved_errno == ENOTSUP || saved_errno == ENODATA)
         {
-          struct stat st;
           char whiteout_opq_path[PATH_MAX];
 
           sprintf (whiteout_opq_path, "%s/" OPAQUE_WHITEOUT, path);
 
-          if (fstatat (dirfd, whiteout_opq_path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+          if (file_exists_at (dirfd, whiteout_opq_path) == 0)
             return 1;
 
           return (errno == ENOENT) ? 0 : -1;
@@ -496,9 +501,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
 
       for (l = get_lower_layers (lo); l; l = l->next)
         {
-          struct stat st;
-
-          ret = TEMP_FAILURE_RETRY (fstatat (l->fd, path, &st, AT_SYMLINK_NOFOLLOW));
+          ret = file_exists_at (l->fd, path);
           if (ret < 0 && errno == ENOENT)
             continue;
 
@@ -816,7 +819,7 @@ node_compare (const void *n1, const void *n2)
   return strcmp (node1->name, node2->name) == 0 ? true : false;
 }
 
-static void
+static inline void
 cleanup_node_initp (struct ovl_node **p)
 {
   struct ovl_node *n = *p;
@@ -1058,7 +1061,7 @@ static struct ovl_node *
 load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char *path, char *name)
 {
   struct dirent *dent;
-  struct stat st, tmp_st;
+  struct stat st;
   struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
 
   if (!n)
@@ -1134,7 +1137,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
           sprintf (node_path, "%s/%s", n->path, dent->d_name);
 
-          ret = TEMP_FAILURE_RETRY (fstatat (fd, whiteout_path, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          ret = file_exists_at (fd, whiteout_path);
           if (ret < 0 && errno != ENOENT)
             return NULL;
 
@@ -1290,7 +1293,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     {
       int ret;
       struct ovl_layer *it;
-      struct stat st, tmp_st;
+      struct stat st;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
 
       for (it = lo->layers; it; it = it->next)
@@ -1313,7 +1316,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
                   sprintf (whpath, "%s/.wh.%s", pnode->path, name);
 
-                  ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
+                  ret = file_exists_at (it->fd, whpath);
                   if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
                     return NULL;
                   if (ret == 0)
@@ -1343,7 +1346,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
           sprintf (whpath, "%s/.wh.%s", pnode->path, name);
 
-          ret = TEMP_FAILURE_RETRY (fstatat (it->fd, whpath, &tmp_st, AT_SYMLINK_NOFOLLOW));
+          ret = file_exists_at (it->fd, whpath);
           if (ret < 0 && errno != ENOENT)
             return NULL;
           if (ret == 0)
