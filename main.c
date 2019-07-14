@@ -172,8 +172,8 @@ struct ovl_node
   char *path;
   char *name;
   int lookups;
-  ino_t ino;
   int hidden_dirfd;
+  ino_t ino;
 
   unsigned int present_lowerdir : 1;
   unsigned int do_unlink : 1;
@@ -185,7 +185,6 @@ struct ovl_node
 struct ovl_data
 {
   struct fuse_session *se;
-  int debug;
   char *uid_str;
   char *gid_str;
   struct ovl_mapping *uid_mappings;
@@ -197,6 +196,7 @@ struct ovl_data
   char *workdir;
   char *redirect_dir;
   int workdir_fd;
+  int debug;
   struct ovl_layer *layers;
 
   struct ovl_node *root;
