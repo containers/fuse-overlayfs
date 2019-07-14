@@ -2734,7 +2734,6 @@ static void
 ovl_read (fuse_req_t req, fuse_ino_t ino, size_t size,
 	 off_t offset, struct fuse_file_info *fi)
 {
-  cleanup_lock int l = enter_big_lock ();
   struct fuse_bufvec buf = FUSE_BUFVEC_INIT (size);
   if (ovl_debug (req))
     fprintf (stderr, "ovl_read(ino=%" PRIu64 ", size=%zd, "
