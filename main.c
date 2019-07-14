@@ -240,6 +240,7 @@ struct ovl_data
   char *timeout_str;
   double timeout;
   int threaded;
+  int fsync;
 };
 
 static double
@@ -267,6 +268,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, timeout_str), 0},
   {"threaded=%d",
    offsetof (struct ovl_data, threaded), 0},
+  {"fsync=%d",
+   offsetof (struct ovl_data, fsync), 1},
   FUSE_OPT_END
 };
 
@@ -3897,7 +3900,7 @@ ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *
 
   node = do_lookup_file (lo, ino, NULL);
 
-  do_fsync = node && node->layer == get_upper_layer (lo);
+  do_fsync = lo->fsync && node && node->layer == get_upper_layer (lo);
 
   l = release_big_lock ();
 
@@ -4118,6 +4121,7 @@ main (int argc, char *argv[])
                         .lowerdir = NULL,
                         .redirect_dir = NULL,
                         .mountpoint = NULL,
+                        .fsync = 1,
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
   };
