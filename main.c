@@ -3959,6 +3959,8 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
         }
     }
 
+  l = release_big_lock ();
+
   if (ioctl (fd, cmd, &r) < 0)
     fuse_reply_err (req, errno);
   else
