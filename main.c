@@ -3577,7 +3577,6 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 static void
 ovl_statfs (fuse_req_t req, fuse_ino_t ino)
 {
-  cleanup_lock int l = enter_big_lock ();
   int ret;
   struct statvfs sfs;
   struct ovl_data *lo = ovl_data (req);
