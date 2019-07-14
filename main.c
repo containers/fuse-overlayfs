@@ -3884,14 +3884,30 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 static void
 ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
 {
-  int ret, fd;
+  int fd;
+  int ret = 0;
+  bool do_fsync;
+  struct ovl_node *node;
+  struct ovl_data *lo = ovl_data (req);
+  cleanup_lock int l = enter_big_lock ();
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
              ino, datasync, fi);
 
+  node = do_lookup_file (lo, ino, NULL);
+
+  do_fsync = node && node->layer == get_upper_layer (lo);
+
+  l = release_big_lock ();
+
   fd = fi->fh;
-  ret = datasync ? fdatasync (fd) : fsync (fd);
+
+  if (do_fsync)
+    {
+      /* Skip fsync for lower layers.  */
+      ret = datasync ? fdatasync (fd) : fsync (fd);
+    }
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
