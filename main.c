@@ -174,6 +174,7 @@ struct ovl_node
   int lookups;
   int hidden_dirfd;
   ino_t ino;
+  size_t name_hash;
 
   unsigned int present_lowerdir : 1;
   unsigned int do_unlink : 1;
@@ -875,7 +876,7 @@ static size_t
 node_hasher (const void *p, size_t s)
 {
   struct ovl_node *n = (struct ovl_node *) p;
-  return hash_string (n->name, s);
+  return n->name_hash % s;
 }
 
 static bool
@@ -883,6 +884,9 @@ node_compare (const void *n1, const void *n2)
 {
   struct ovl_node *node1 = (struct ovl_node *) n1;
   struct ovl_node *node2 = (struct ovl_node *) n2;
+
+  if (node1->name_hash != node2->name_hash)
+    return false;
 
   return strcmp (node1->name, node2->name) == 0 ? true : false;
 }
@@ -902,19 +906,31 @@ cleanup_node_initp (struct ovl_node **p)
 
 #define cleanup_node_init __attribute__((cleanup (cleanup_node_initp)))
 
+static void
+node_set_name (struct ovl_node *node, char *name)
+{
+  node->name = name;
+  if (name == NULL)
+    node->name_hash = 0;
+  else
+    node->name_hash = hash_string (name, SIZE_MAX);
+}
+
 static struct ovl_node *
 make_whiteout_node (const char *path, const char *name)
 {
-  struct ovl_node *ret_xchg;
   cleanup_node_init struct ovl_node *ret = NULL;
+  struct ovl_node *ret_xchg;
+  char *new_name;
 
   ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
     return NULL;
 
-  ret->name = strdup (name);
-  if (ret->name == NULL)
+  new_name = strdup (name);
+  if (new_name == NULL)
       return NULL;
+  node_set_name (ret, new_name);
 
   ret->path = strdup (path);
   if (ret->path == NULL)
@@ -970,6 +986,7 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
 static struct ovl_node *
 make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent)
 {
+  char *new_name;
   struct ovl_node *ret_xchg;
   cleanup_node_init struct ovl_node *ret = NULL;
 
@@ -981,9 +998,11 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
   ret->layer = layer;
   ret->ino = ino;
   ret->hidden_dirfd = -1;
-  ret->name = strdup (name);
-  if (ret->name == NULL)
+
+  new_name = strdup (name);
+  if (new_name == NULL)
     return NULL;
+  node_set_name (ret, new_name);
 
   if (has_prefix (path, "./") && path[2])
     path += 2;
@@ -1175,7 +1194,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
               break;
             }
 
-          key.name = dent->d_name;
+          node_set_name (&key, dent->d_name);
 
           if ((strcmp (dent->d_name, ".") == 0) || strcmp (dent->d_name, "..") == 0)
             continue;
@@ -1367,7 +1386,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       return NULL;
     }
 
-  key.name = (char *) name;
+  node_set_name (&key, (char *) name);
   node = hash_lookup (pnode->children, &key);
   if (node == NULL)
     {
@@ -1655,7 +1674,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
               if (strcmp (dent->d_name, "..") == 0)
                 continue;
 
-              key.name = (char *) dent->d_name;
+              node_set_name (&key, (char *) dent->d_name);
 
               n = hash_lookup (node->children, &key);
               if (n)
@@ -2418,7 +2437,8 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
-  key.name = (char *) name;
+  node_set_name (&key, (char *) name);
+
   rm = hash_delete (pnode->children, &key);
   if (rm)
     {
@@ -3245,8 +3265,8 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   destnode->path = tmp;
 
   tmp = node->name;
-  node->name = destnode->name;
-  destnode->name = tmp;
+  node_set_name (node, destnode->name);
+  node_set_name (destnode, tmp);
 
   node = insert_node (destpnode, node, true);
   if (node == NULL)
@@ -3344,7 +3364,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
     goto error;
   destfd = ret;
 
-  key.name = (char *) newname;
+  node_set_name (&key, (char *) newname);
   destnode = hash_lookup (destpnode->children, &key);
 
   node = get_node_up (lo, node);
@@ -3453,7 +3473,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   hash_delete (pnode->children, node);
 
   free (node->name);
-  node->name = strdup (newname);
+  node_set_name (node, strdup (newname));
   if (node->name == NULL)
     goto error;
 
