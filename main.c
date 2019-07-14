@@ -3887,7 +3887,6 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 static void
 ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
 {
-  cleanup_lock int l = enter_big_lock ();
   int ret, fd;
 
   if (ovl_debug (req))
