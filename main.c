@@ -2750,7 +2750,6 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 	      struct fuse_bufvec *in_buf, off_t off,
 	      struct fuse_file_info *fi)
 {
-  cleanup_lock int l = enter_big_lock ();
   (void) ino;
   ssize_t res;
   struct fuse_bufvec out_buf = FUSE_BUFVEC_INIT (fuse_buf_size (in_buf));
