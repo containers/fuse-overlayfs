@@ -2901,12 +2901,15 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 {
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
+  cleanup_close int cleaned_up_fd = -1;
   struct ovl_node *node;
   struct fuse_entry_param e;
   struct timespec times[2];
   uid_t uid;
   gid_t gid;
-  int dirfd;
+  int ret;
+  int fd;
+  char proc_path[PATH_MAX];
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
@@ -2925,12 +2928,49 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       return;
     }
 
-  dirfd = node_dirfd (node);
-
   if (to_set & FUSE_SET_ATTR_CTIME)
     {
       fuse_reply_err (req, EPERM);
       return;
+    }
+
+  if (fi != NULL)
+    fd = fi->fh;  // use existing fd if fuse_file_info is available
+  else
+    {
+      int dirfd = node_dirfd (node);
+
+      cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|O_WRONLY));
+      if (fd < 0)
+        {
+          if (errno == EISDIR)
+            goto handle_eisdir;
+          if (errno == ELOOP)
+            goto handle_eloop;
+
+          fuse_reply_err (req, errno);
+          return;
+
+handle_eisdir:
+          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK));
+          if (fd < 0)
+            {
+              if (errno != ELOOP)
+                {
+                  fuse_reply_err (req, errno);
+                  return;
+                }
+handle_eloop:
+              /* It is a symlink and it cannot be used directly.  Fallback to the /proc/fd/$FD path.  */
+              cleaned_up_fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_PATH|O_NOFOLLOW|O_NONBLOCK));
+              if (cleaned_up_fd < 0)
+                {
+                  fuse_reply_err (req, errno);
+                  return;
+                }
+              sprintf (proc_path, "/proc/self/fd/%d", cleaned_up_fd);
+            }
+        }
     }
 
   memset (times, 0, sizeof (times));
@@ -2948,43 +2988,39 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   if (times[0].tv_sec != UTIME_OMIT || times[1].tv_sec != UTIME_OMIT)
     {
-      if ((utimensat (dirfd, node->path, times, AT_SYMLINK_NOFOLLOW) < 0))
+      if (fd >= 0)
+        ret = futimens (fd, times);
+      else
+        ret = utimensat (AT_FDCWD, proc_path, times, AT_SYMLINK_NOFOLLOW);
+      if (ret < 0)
         {
           fuse_reply_err (req, errno);
           return;
         }
     }
 
-  if ((to_set & FUSE_SET_ATTR_MODE) && fchmodat (dirfd, node->path, attr->st_mode, 0) < 0)
+  if (to_set & FUSE_SET_ATTR_MODE)
     {
-      fuse_reply_err (req, errno);
-      return;
-    }
-  if (to_set & FUSE_SET_ATTR_SIZE)
-    {
-      int fd, ret, saved_errno;
-
-      if (fi == NULL)
-        {
-          fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_WRONLY|O_NONBLOCK));
-          if (fd < 0)
-            {
-              fuse_reply_err (req, errno);
-              return;
-            }
-        }
+      if (fd >= 0)
+        ret = fchmod (fd, attr->st_mode);
       else
-          fd = fi->fh;  // use existing fd if fuse_file_info is available
-
-      ret = ftruncate (fd, attr->st_size);
-      saved_errno = errno;
-
-      if (fi == NULL)
-        close (fd);
-
+        ret = chmod (proc_path, attr->st_mode);
       if (ret < 0)
         {
-          fuse_reply_err (req, saved_errno);
+          fuse_reply_err (req, errno);
+          return;
+        }
+    }
+
+  if (to_set & FUSE_SET_ATTR_SIZE)
+    {
+      if (fd >= 0)
+        ret = ftruncate (fd, attr->st_size);
+      else
+        ret = truncate (proc_path, attr->st_size);
+      if (ret < 0)
+        {
+          fuse_reply_err (req, errno);
           return;
         }
     }
@@ -2998,14 +3034,18 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   if (uid != -1 || gid != -1)
     {
-      if (fchownat (dirfd, node->path, uid, gid, AT_SYMLINK_NOFOLLOW) < 0)
+      if (fd >= 0)
+        ret = fchown (fd, uid, gid);
+      else
+        ret = chown (proc_path, uid, gid);
+      if (ret < 0)
         {
           fuse_reply_err (req, errno);
           return;
         }
     }
 
-  if (do_getattr (req, &e, node, -1, NULL) < 0)
+  if (do_getattr (req, &e, node, fd, proc_path) < 0)
     {
       fuse_reply_err (req, errno);
       return;
