@@ -1918,6 +1918,8 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
+  l = release_big_lock ();
+
   len = flistxattr (fd, buf, size);
   if (len < 0)
     fuse_reply_err (req, errno);
@@ -1963,6 +1965,8 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       fuse_reply_err (req, errno);
       return;
     }
+
+  l = release_big_lock ();
 
   len = fgetxattr (fd, name, buf, size);
   if (len < 0)
@@ -2582,6 +2586,8 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
+  l = release_big_lock ();
+
   if (fsetxattr (fd, name, value, size, flags) < 0)
     {
       fuse_reply_err (req, errno);
@@ -2622,6 +2628,8 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       fuse_reply_err (req, errno);
       return;
     }
+
+  l = release_big_lock ();
 
   if (fremovexattr (fd, name) < 0)
     {
@@ -2972,6 +2980,8 @@ handle_eloop:
             }
         }
     }
+
+  l = release_big_lock ();
 
   memset (times, 0, sizeof (times));
   times[0].tv_sec = UTIME_OMIT;
