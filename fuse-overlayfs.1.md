@@ -90,5 +90,5 @@ Those are the same IDs visible from outside the user namespace.
 
 # AVAILABILITY
 
-The slirp4netns command is available from
+The fuse-overlayfs command is available from
 **https://github.com/containers/fuse-overlayfs** under GNU GENERAL PUBLIC LICENSE Version 3 or later.
