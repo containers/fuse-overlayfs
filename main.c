@@ -242,6 +242,7 @@ struct ovl_data
   int threaded;
   int fsync;
   int fast_ino_check;
+  int writeback;
 };
 
 static double
@@ -273,6 +274,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, fsync), 1},
   {"fast_ino=%d",
    offsetof (struct ovl_data, fast_ino_check), 0},
+  {"writeback=%d",
+   offsetof (struct ovl_data, writeback), 1},
   FUSE_OPT_END
 };
 
@@ -491,7 +494,11 @@ ovl_debug (fuse_req_t req)
 static void
 ovl_init (void *userdata, struct fuse_conn_info *conn)
 {
-  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_MOVE;
+  struct ovl_data *lo = (struct ovl_data *) userdata;
+
+  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE;
+  if (lo->writeback)
+    conn->want |= FUSE_CAP_WRITEBACK_CACHE;
 }
 
 static struct ovl_layer *
@@ -2653,6 +2660,17 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
   flags |= O_NOFOLLOW;
 
+  if (lo->writeback)
+    {
+      if ((flags & O_ACCMODE) == O_WRONLY)
+        {
+          flags &= ~O_ACCMODE;
+          flags |= O_RDWR;
+        }
+      if (flags & O_APPEND)
+        flags &= ~O_APPEND;
+    }
+
   if (name && has_prefix (name, ".wh."))
     {
       errno = EINVAL;
@@ -2767,7 +2785,7 @@ ovl_read (fuse_req_t req, fuse_ino_t ino, size_t size,
   buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
   buf.buf[0].fd = fi->fh;
   buf.buf[0].pos = offset;
-  fuse_reply_data (req, &buf, FUSE_BUF_SPLICE_MOVE);
+  fuse_reply_data (req, &buf, 0);
 }
 
 static void
@@ -2787,7 +2805,7 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 	     ino, out_buf.buf[0].size, (unsigned long) off, (int) fi->fh);
 
   errno = 0;
-  res = fuse_buf_copy (&out_buf, in_buf, FUSE_BUF_SPLICE_MOVE | FUSE_BUF_SPLICE_NONBLOCK);
+  res = fuse_buf_copy (&out_buf, in_buf, 0);
   if (res < 0)
     fuse_reply_err (req, errno);
   else
@@ -4123,6 +4141,14 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "noexec") == 0)
     return 1;
+  if (strcmp (arg, "splice_write") == 0)
+    return 1;
+  if (strcmp (arg, "splice_read") == 0)
+    return 1;
+  if (strcmp (arg, "splice_move") == 0)
+    return 1;
+  if (strcmp (arg, "max_write") == 0)
+    return 1;
 
   if (key == FUSE_OPT_KEY_NONOPT)
     {
@@ -4146,9 +4172,9 @@ get_new_args (int *argc, char **argv)
   char **newargv = malloc (sizeof (char *) * (*argc + 2));
   newargv[0] = argv[0];
   if (geteuid() == 0)
-      newargv[1] = "-odefault_permissions,allow_other,suid";
+    newargv[1] = "-odefault_permissions,allow_other,suid";
   else
-      newargv[1] = "-odefault_permissions";
+    newargv[1] = "-odefault_permissions";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
@@ -4188,6 +4214,7 @@ main (int argc, char *argv[])
                         .fsync = 1,
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
+                        .writeback = 1,
   };
   struct fuse_loop_config fuse_conf = {
                                        .clone_fd = 1,
