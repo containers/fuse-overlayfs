@@ -243,6 +243,7 @@ struct ovl_data
   int fsync;
   int fast_ino_check;
   int writeback;
+  int disable_xattrs;
 };
 
 static double
@@ -276,6 +277,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, fast_ino_check), 0},
   {"writeback=%d",
    offsetof (struct ovl_data, writeback), 1},
+  {"noxattrs=%d",
+   offsetof (struct ovl_data, disable_xattrs), 1},
   FUSE_OPT_END
 };
 
@@ -1901,6 +1904,12 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   if (ovl_debug (req))
     fprintf (stderr, "ovl_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
 
+  if (lo->disable_xattrs)
+    {
+      fuse_reply_err (req, ENOSYS);
+      return;
+    }
+
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
     {
@@ -1948,6 +1957,12 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
+
+  if (lo->disable_xattrs)
+    {
+      fuse_reply_err (req, ENOSYS);
+      return;
+    }
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2565,6 +2580,12 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   if (ovl_debug (req))
     fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
+
+  if (lo->disable_xattrs)
+    {
+      fuse_reply_err (req, ENOSYS);
+      return;
+    }
 
   if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX))
     {
