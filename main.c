@@ -2938,8 +2938,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   if (to_set & FUSE_SET_ATTR_CTIME)
     {
-      fuse_reply_err (req, EPERM);
-      return;
+      /* Ignore request.  */
     }
 
   if (fi != NULL)
