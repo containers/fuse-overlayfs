@@ -530,6 +530,32 @@ node_dirfd (struct ovl_node *n)
   return n->layer->fd;
 }
 
+static void
+get_node_path (struct ovl_data *lo, struct ovl_node *n, char *path)
+{
+  if (n->hidden)
+    strconcat3 (path, PATH_MAX, lo->workdir, "/", n->path);
+  else
+    strconcat3 (path, PATH_MAX, n->layer->path, "/", n->path);
+}
+
+static int
+open_fd_or_get_path (struct ovl_data *lo, struct ovl_node *n, char *path, int *fd, int mode)
+{
+  int ret;
+
+  path[0] = '\0';
+
+  *fd = TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, O_NONBLOCK|O_NOFOLLOW|mode));
+  if (*fd < 0 && errno == ELOOP)
+    {
+      get_node_path (lo, n, path);
+      return 0;
+    }
+
+  return *fd;
+}
+
 static bool
 has_prefix (const char *str, const char *pref)
 {
@@ -1900,6 +1926,8 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
   cleanup_close int fd = -1;
+  char path[PATH_MAX];
+  int ret;
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_listxattr(ino=%" PRIu64 ", size=%zu)\n", ino, size);
@@ -1927,8 +1955,9 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
         }
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
-  if (fd < 0)
+  path[0] = '\0';
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_WRONLY);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -1936,7 +1965,11 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 
   l = release_big_lock ();
 
-  len = flistxattr (fd, buf, size);
+  if (fd >= 0)
+    len = flistxattr (fd, buf, size);
+  else
+    len = llistxattr (path, buf, size);
+
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
@@ -1954,6 +1987,8 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
   cleanup_close int fd = -1;
+  char path[PATH_MAX];
+  int ret;
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_getxattr(ino=%" PRIu64 ", name=%s, size=%zu)\n", ino, name, size);
@@ -1981,8 +2016,9 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
         }
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
-  if (fd < 0)
+  path[0] = '\0';
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_RDONLY);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -1990,7 +2026,11 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
 
   l = release_big_lock ();
 
-  len = fgetxattr (fd, name, buf, size);
+  if (fd >= 0)
+    len = fgetxattr (fd, name, buf, size);
+  else
+    len = lgetxattr (path, name, buf, size);
+
   if (len < 0)
     fuse_reply_err (req, errno);
   else if (size == 0)
@@ -2576,6 +2616,8 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node;
   cleanup_close int fd = -1;
+  char path[PATH_MAX];
+  int ret;
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
@@ -2607,8 +2649,9 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK));
-  if (fd < 0)
+  path[0] = '\0';
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_WRONLY);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -2616,10 +2659,14 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
 
   l = release_big_lock ();
 
-  if (fsetxattr (fd, name, value, size, flags) < 0)
+  if (fd >= 0)
+    ret = fsetxattr (fd, name, value, size, flags);
+  else
+    ret = setxattr (path, name, value, size, flags);
+
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
-      close (fd);
       return;
     }
   fuse_reply_err (req, 0);
@@ -2632,6 +2679,8 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_close int fd = -1;
+  char path[PATH_MAX];
+  int ret;
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
@@ -2650,8 +2699,9 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       return;
     }
 
-  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK));
-  if (fd < 0)
+  path[0] = '\0';
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_WRONLY);
+  if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -2659,9 +2709,13 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 
   l = release_big_lock ();
 
-  if (fremovexattr (fd, name) < 0)
+  if (fd >= 0)
+    ret = fremovexattr (fd, name);
+  else
+    ret = lremovexattr (path, name);
+
+  if (ret < 0)
     {
-      close (fd);
       fuse_reply_err (req, errno);
       return;
     }
