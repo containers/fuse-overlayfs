@@ -217,6 +217,7 @@ struct ovl_node
   unsigned int do_rmdir : 1;
   unsigned int hidden : 1;
   unsigned int whiteout : 1;
+  unsigned int loaded : 1;
 };
 
 struct ovl_data
@@ -905,6 +906,7 @@ node_free (void *p)
     {
       if (hash_lookup (n->parent->children, n) == n)
         hash_delete (n->parent->children, n);
+      n->parent->loaded = 0;
       n->parent = NULL;
     }
 
@@ -1377,6 +1379,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         break;
     }
 
+  n->loaded = 1;
   return n;
 }
 
@@ -1480,7 +1483,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
   node_set_name (&key, (char *) name);
   node = hash_lookup (pnode->children, &key);
-  if (node == NULL)
+  if (node == NULL && !pnode->loaded)
     {
       int ret;
       struct ovl_layer *it;
