@@ -4064,14 +4064,22 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
   bool do_fsync;
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
-  cleanup_lock int l = enter_big_lock ();
+  cleanup_lock int l = 0;
   cleanup_close int cfd = -1;
   char path[PATH_MAX];
+
+  if (!lo->fsync)
+    {
+      fuse_reply_err (req, 0);
+      return;
+    }
+
+  l = enter_big_lock ();
 
   node = do_lookup_file (lo, ino, NULL);
 
   /* Skip fsync for lower layers.  */
-  do_fsync = lo->fsync && node && node->layer == get_upper_layer (lo);
+  do_fsync = node && node->layer == get_upper_layer (lo);
 
   if (fd < 0)
     strcpy (path, node->path);
