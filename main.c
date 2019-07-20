@@ -4058,33 +4058,66 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 }
 
 static void
-ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
+do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
 {
-  int fd;
   int ret = 0;
   bool do_fsync;
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_lock int l = enter_big_lock ();
+  cleanup_close int cfd = -1;
+  char path[PATH_MAX];
 
+  node = do_lookup_file (lo, ino, NULL);
+
+  /* Skip fsync for lower layers.  */
+  do_fsync = lo->fsync && node && node->layer == get_upper_layer (lo);
+
+  if (fd < 0)
+    strcpy (path, node->path);
+
+  l = release_big_lock ();
+
+  if (! do_fsync)
+    {
+      fuse_reply_err (req, 0);
+      return;
+    }
+
+  if (fd < 0)
+    {
+      cfd = openat (get_upper_layer (lo)->fd, path, O_NOFOLLOW|O_DIRECTORY);
+      if (cfd < 0)
+        {
+          fuse_reply_err (req, errno == ENOENT ? 0 : errno);
+          return;
+        }
+      fd = cfd;
+    }
+
+  if (do_fsync)
+    ret = datasync ? fdatasync (fd) : fsync (fd);
+  fuse_reply_err (req, ret == 0 ? 0 : errno);
+}
+
+static void
+ovl_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
+{
   if (ovl_debug (req))
     fprintf (stderr, "ovl_fsync(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
              ino, datasync, fi);
 
-  node = do_lookup_file (lo, ino, NULL);
+  return do_fsync (req, ino, datasync, fi->fh);
+}
 
-  do_fsync = lo->fsync && node && node->layer == get_upper_layer (lo);
+static void
+ovl_fsyncdir (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi)
+{
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_fsyncdir(ino=%" PRIu64 ", datasync=%d, fi=%p)\n",
+             ino, datasync, fi);
 
-  l = release_big_lock ();
-
-  fd = fi->fh;
-
-  if (do_fsync)
-    {
-      /* Skip fsync for lower layers.  */
-      ret = datasync ? fdatasync (fd) : fsync (fd);
-    }
-  fuse_reply_err (req, ret == 0 ? 0 : errno);
+  return do_fsync (req, ino, datasync, -1);
 }
 
 static void
@@ -4190,6 +4223,7 @@ static struct fuse_lowlevel_ops ovl_oper =
    .mknod = ovl_mknod,
    .link = ovl_link,
    .fsync = ovl_fsync,
+   .fsyncdir = ovl_fsyncdir,
    .ioctl = ovl_ioctl,
   };
 
