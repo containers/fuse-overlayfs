@@ -27,6 +27,7 @@ fuse-overlayfs -o sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev 
 
 docker run --rm -ti -v $(pwd)/merged:/merged fedora sh -c 'rm -rf /merged/usr/share/glib-2.0/'
 
+tar -c --to-stdout $(pwd)/merged > /dev/null
 
 umount merged
 rm -rf workdir lower upper
