@@ -2901,13 +2901,14 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 static void
 ovl_release (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
+  int ret;
   (void) ino;
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_release(ino=%" PRIu64 ")\n", ino);
 
-  close (fi->fh);
-  fuse_reply_err (req, 0);
+  ret = close (fi->fh);
+  fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
 static int
