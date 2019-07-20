@@ -1383,6 +1383,14 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
   return n;
 }
 
+static struct ovl_node *
+reload_dir (struct ovl_data *lo, struct ovl_node *node)
+{
+  if (! node->loaded)
+    node = load_dir (lo, node, node->layer, node->path, node->name);
+  return node;
+}
+
 static void
 free_layers (struct ovl_layer *layers)
 {
@@ -1678,7 +1686,7 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       goto out_errno;
     }
 
-  node = load_dir (lo, node, node->layer, node->path, node->name);
+  node = reload_dir (lo, node);
   if (node == NULL)
     goto out_errno;
 
@@ -1724,7 +1732,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
   if (! node_dirp (node))
     return 0;
 
-  node = load_dir (lo, node, node->layer, node->path, node->name);
+  node = reload_dir (lo, node);
   if (node == NULL)
     return -1;
 
@@ -1783,7 +1791,7 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                     {
                       char c[PATH_MAX];
 
-                      n = load_dir (lo, n, n->layer, n->path, n->name);
+                      n = reload_dir (lo, n);
                       if (n == NULL)
                         return -1;
 
@@ -2516,7 +2524,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       size_t c;
 
       /* Re-load the directory.  */
-      node = load_dir (lo, node, node->layer, node->path, node->name);
+      node = reload_dir (lo, node);
       if (node == NULL)
         {
           fuse_reply_err (req, errno);
@@ -3418,7 +3426,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   if (node_dirp (node))
     {
-      node = load_dir (lo, node, node->layer, node->path, node->name);
+      node = reload_dir (lo, node);
       if (node == NULL)
         {
           fuse_reply_err (req, errno);
@@ -3550,7 +3558,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   if (node_dirp (node))
     {
-      node = load_dir (lo, node, node->layer, node->path, node->name);
+      node = reload_dir (lo, node);
       if (node == NULL)
         {
           fuse_reply_err (req, errno);
@@ -3610,7 +3618,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
       if (!destnode->whiteout && node_dirp (destnode))
         {
-          destnode = load_dir (lo, destnode, destnode->layer, destnode->path, destnode->name);
+          destnode = reload_dir (lo, destnode);
           if (destnode == NULL)
             goto error;
 
@@ -3817,7 +3825,7 @@ hide_all (struct ovl_data *lo, struct ovl_node *node)
   struct ovl_node **nodes;
   size_t i, nodes_size;
 
-  node = load_dir (lo, node, node->layer, node->path, node->name);
+  node = reload_dir (lo, node);
   if (node == NULL)
     return -1;
 
