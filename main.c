@@ -4210,7 +4210,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
   int ret;
 
   if (ovl_debug (req))
-    fprintf (stderr, "ovl_fallocate(ino=%" PRIu64 ", mode=%d, offset=%llou, length=%llu, fi=%p)\n",
+    fprintf (stderr, "ovl_fallocate(ino=%" PRIu64 ", mode=%d, offset=%llo, length=%llu, fi=%p)\n",
              ino, mode, offset, length, fi);
 
   node = do_lookup_file (lo, ino, NULL);
@@ -4239,6 +4239,66 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
   ret = fallocate (fd, mode, offset, length);
   fuse_reply_err (req, ret < 0 ? errno : 0);
 }
+
+#ifdef HAVE_COPY_FILE_RANGE
+static void
+ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fuse_file_info *fi_in, fuse_ino_t ino_out, off_t off_out, struct fuse_file_info *fi_out, size_t len, int flags)
+{
+  cleanup_lock int l = enter_big_lock ();
+  struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node, *dnode;
+  cleanup_close int fd_dest = -1;
+  cleanup_close int fd = -1;
+  ssize_t ret;
+
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_copy_file_range(ino_in=%" PRIu64 ", off_in=%llo, fi_in=%p), ino_out=%" PRIu64 ", off_out=%llo, fi_out=%p, size=%zu, flags=%d)\n",
+             ino_in, off_in, fi_in, ino_out, off_out, fi_out, len, flags);
+
+  node = do_lookup_file (lo, ino_in, NULL);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
+  dnode = do_lookup_file (lo, ino_out, NULL);
+  if (dnode == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
+  dnode = get_node_up (lo, dnode);
+  if (dnode == NULL)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK|O_NOFOLLOW|O_RDONLY));
+  if (fd < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  fd_dest = TEMP_FAILURE_RETRY (openat (node_dirfd (dnode), dnode->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY));
+  if (fd < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  l = release_big_lock ();
+
+  ret = copy_file_range (fd, &off_in, fd_dest, &off_out, len, flags);
+  if (ret < 0)
+    fuse_reply_err (req, errno);
+  else
+    fuse_reply_write (req, ret);
+}
+#endif
 
 static struct fuse_lowlevel_ops ovl_oper =
   {
@@ -4274,6 +4334,9 @@ static struct fuse_lowlevel_ops ovl_oper =
    .fsyncdir = ovl_fsyncdir,
    .ioctl = ovl_ioctl,
    .fallocate = ovl_fallocate,
+#ifdef HAVE_COPY_FILE_RANGE
+   .copy_file_range = ovl_copy_file_range,
+#endif
   };
 
 static int
