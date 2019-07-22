@@ -4200,6 +4200,46 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
     fuse_reply_ioctl (req, 0, &r, out_bufsz ? sizeof (r) : 0);
 }
 
+static void
+ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t length, struct fuse_file_info *fi)
+{
+  cleanup_lock int l = enter_big_lock ();
+  struct ovl_data *lo = ovl_data (req);
+  cleanup_close int fd = -1;
+  struct ovl_node *node;
+  int ret;
+
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_fallocate(ino=%" PRIu64 ", mode=%d, offset=%llou, length=%llu, fi=%p)\n",
+             ino, mode, offset, length, fi);
+
+  node = do_lookup_file (lo, ino, NULL);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
+  node = get_node_up (lo, node);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  fd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY));
+  if (fd < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  l = release_big_lock ();
+
+  ret = fallocate (fd, mode, offset, length);
+  fuse_reply_err (req, ret < 0 ? errno : 0);
+}
+
 static struct fuse_lowlevel_ops ovl_oper =
   {
    .statfs = ovl_statfs,
@@ -4233,6 +4273,7 @@ static struct fuse_lowlevel_ops ovl_oper =
    .fsync = ovl_fsync,
    .fsyncdir = ovl_fsyncdir,
    .ioctl = ovl_ioctl,
+   .fallocate = ovl_fallocate,
   };
 
 static int
