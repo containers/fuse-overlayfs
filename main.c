@@ -209,6 +209,7 @@ struct ovl_node
   char *name;
   int lookups;
   int hidden_dirfd;
+  int nlinks;
   ino_t ino;
   size_t name_hash;
 
@@ -868,7 +869,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
   st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
 
   st->st_ino = node->ino;
-  if (ret == 0 && node_dirp (node))
+  if (ret == 0 && node_dirp (node) && node->nlinks <= 0)
     {
       struct ovl_node *it;
 
@@ -879,6 +880,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
           if (node_dirp (it))
             st->st_nlink++;
         }
+      node->nlinks = st->st_nlink;
     }
 
   return ret;
@@ -1207,19 +1209,26 @@ static struct ovl_node *
 insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
 {
   struct ovl_node *old = NULL, *prev_parent = item->parent;
+  int is_dir = node_dirp (item);
   int ret;
 
   if (prev_parent)
     {
       if (hash_lookup (prev_parent->children, item) == item)
         hash_delete (prev_parent->children, item);
+      if (is_dir)
+        prev_parent->nlinks--;
     }
 
   if (replace)
     {
       old = hash_delete (parent->children, item);
       if (old)
-        node_free (old);
+        {
+          node_free (old);
+          if (node_dirp (old))
+            parent->nlinks--;
+        }
     }
 
   ret = hash_insert_if_absent (parent->children, item, (const void **) &old);
@@ -1236,6 +1245,8 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
     }
 
   item->parent = parent;
+  if (is_dir)
+    parent->nlinks++;
 
   return item;
 }
