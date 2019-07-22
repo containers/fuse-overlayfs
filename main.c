@@ -962,6 +962,22 @@ ovl_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
   fuse_reply_none (req);
 }
 
+static void
+ovl_forget_multi (fuse_req_t req, size_t count, struct fuse_forget_data *forgets)
+{
+  size_t i;
+  cleanup_lock int l = enter_big_lock ();
+
+  if (ovl_debug (req))
+    fprintf (stderr, "ovl_forget_multi(count=%zu, forgets=%p)\n",
+	     count, forgets);
+
+  for (i = 0; i < count; i++)
+    do_forget (forgets[i].ino, forgets[i].nlookup);
+
+  fuse_reply_none (req);
+}
+
 static size_t
 node_hasher (const void *p, size_t s)
 {
@@ -4311,6 +4327,7 @@ static struct fuse_lowlevel_ops ovl_oper =
    .init = ovl_init,
    .lookup = ovl_lookup,
    .forget = ovl_forget,
+   .forget_multi = ovl_forget_multi,
    .getattr = ovl_getattr,
    .readlink = ovl_readlink,
    .opendir = ovl_opendir,
