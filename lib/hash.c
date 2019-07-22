@@ -1,6 +1,6 @@
 /* hash - hashing table processing.
 
-   Copyright (C) 1998-2004, 2006-2007, 2009-2017 Free Software Foundation, Inc.
+   Copyright (C) 1998-2004, 2006-2007, 2009-2019 Free Software Foundation, Inc.
 
    Written by Jim Meyering, 1992.
 
@@ -15,7 +15,7 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* A generic hash table package.  */
 
