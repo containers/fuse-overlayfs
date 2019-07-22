@@ -219,6 +219,7 @@ struct ovl_node
   unsigned int hidden : 1;
   unsigned int whiteout : 1;
   unsigned int loaded : 1;
+  unsigned int no_security_capability : 1;
 };
 
 struct ovl_data
@@ -2030,6 +2031,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   cleanup_free char *buf = NULL;
   cleanup_close int fd = -1;
   char path[PATH_MAX];
+  bool is_security_capability = false;
   int ret;
 
   if (ovl_debug (req))
@@ -2041,10 +2043,19 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
+  if (get_timeout (lo) > 0)
+    is_security_capability = has_prefix (name, "security.capability");
+
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOENT);
+      return;
+    }
+
+  if (is_security_capability && node->no_security_capability)
+    {
+      fuse_reply_err (req, ENODATA);
       return;
     }
 
@@ -2072,6 +2083,9 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
     len = fgetxattr (fd, name, buf, size);
   else
     len = lgetxattr (path, name, buf, size);
+
+  if (get_timeout (lo) > 0 && is_security_capability && len < 0 && errno == ENODATA)
+    node->no_security_capability = 1;
 
   if (len < 0)
     fuse_reply_err (req, errno);
@@ -2656,8 +2670,9 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
 {
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
-  struct ovl_node *node;
+  bool is_security_capability = false;
   cleanup_close int fd = -1;
+  struct ovl_node *node;
   char path[PATH_MAX];
   int ret;
 
@@ -2676,6 +2691,8 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       fuse_reply_err (req, EPERM);
       return;
     }
+
+  is_security_capability = has_prefix (name, "security.capability");
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -2711,6 +2728,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+  node->no_security_capability = 1;
   fuse_reply_err (req, 0);
 }
 
