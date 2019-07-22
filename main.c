@@ -1123,7 +1123,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
     ret->children = NULL;
   else
     {
-      ret->children = hash_initialize (10, NULL, node_hasher, node_compare, node_free);
+      ret->children = hash_initialize (128, NULL, node_hasher, node_compare, node_free);
       if (ret->children == NULL)
         return NULL;
     }
