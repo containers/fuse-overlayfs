@@ -28,6 +28,8 @@ AC_TYPE_UINT64_T
 AC_TYPE_UINT8_T
 AC_CHECK_TYPES([ptrdiff_t])
 
+AC_DEFINE([USE_DIFF_HASH], 1, [Use the same hashing function as GNU diff])
+
 PKG_CHECK_MODULES([FUSE], [fuse3 >= 3.2.1], [AC_DEFINE([HAVE_FUSE], 1, [Define if libfuse is available])], [AC_MSG_ERROR([*** libfuse not found])]])
 
 AC_FUNC_ERROR_AT_LINE
