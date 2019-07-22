@@ -1737,7 +1737,11 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     }
 
   fi->fh = (uintptr_t) d;
-
+  if (get_timeout (lo) > 0)
+    {
+      fi->keep_cache = 1;
+      fi->cache_readdir = 1;
+    }
   fuse_reply_open (req, fi);
   return;
 
@@ -2996,6 +3000,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 static void
 ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
+  struct ovl_data *lo = ovl_data (req);
   cleanup_lock int l = enter_big_lock ();
   cleanup_close int fd = -1;
 
@@ -3009,6 +3014,8 @@ ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       return;
     }
   fi->fh = fd;
+  if (get_timeout (lo) > 0)
+    fi->keep_cache = 1;
   fd = -1;  /* Do not clean it up.  */
   fuse_reply_open (req, fi);
 }
