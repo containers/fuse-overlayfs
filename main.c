@@ -4419,6 +4419,8 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "splice_move") == 0)
     return 1;
+  if (strcmp (arg, "kernel_cache") == 0)
+    return 1;
   if (strcmp (arg, "max_write") == 0)
     return 1;
 
