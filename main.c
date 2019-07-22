@@ -501,7 +501,7 @@ ovl_init (void *userdata, struct fuse_conn_info *conn)
 {
   struct ovl_data *lo = (struct ovl_data *) userdata;
 
-  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE;
+  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
   if (lo->writeback)
     conn->want |= FUSE_CAP_WRITEBACK_CACHE;
 }
