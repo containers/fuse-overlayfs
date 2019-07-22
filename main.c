@@ -1649,7 +1649,10 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   node = do_lookup_file (lo, parent, name);
   if (node == NULL)
     {
-      fuse_reply_err (req, errno);
+      e.ino = 0;
+      e.attr_timeout = get_timeout (lo);
+      e.entry_timeout = get_timeout (lo);
+      fuse_reply_entry (req, &e);
       return;
     }
 
