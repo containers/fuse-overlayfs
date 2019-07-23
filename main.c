@@ -213,7 +213,6 @@ struct ovl_node
   ino_t ino;
   size_t name_hash;
 
-  unsigned int present_lowerdir : 1;
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
   unsigned int hidden : 1;
@@ -1326,18 +1325,15 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           if (child)
             {
               child->last_layer = it;
-              if (child->whiteout && it == upper_layer)
+              if (!child->whiteout || it != upper_layer)
+                continue;
+              else
                 {
                   hash_delete (n->children, child);
                   node_free (child);
                   child = NULL;
                 }
-              else
-                {
-                  if (it->low)
-                    child->present_lowerdir = 1;
-                  continue;
-                }
+
               if (lo->fast_ino_check)
                 continue;
             }
@@ -1573,8 +1569,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           if (node)
             {
               node->ino = st.st_ino;
-              if (it->low)
-                node->present_lowerdir = 1;
+              node->last_layer = it;
               continue;
             }
 
@@ -1617,11 +1612,9 @@ insert_node:
               errno = ENOMEM;
               return NULL;
             }
-          if (node->last_layer)
-            break;
+
           if (pnode && pnode->last_layer == it)
             break;
-
           if (lo->fast_ino_check)
             break;
         }
@@ -3499,7 +3492,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
           return;
         }
 
-      if (node->layer != get_upper_layer (lo) || node->present_lowerdir)
+      if (node->layer != get_upper_layer (lo) || node->last_layer != get_upper_layer (lo))
         {
           fuse_reply_err (req, EXDEV);
           return;
@@ -3539,7 +3532,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
       errno = ENOENT;
       goto error;
     }
-  if (node_dirp (node) && destnode->present_lowerdir)
+  if (node_dirp (node) && destnode->last_layer != get_upper_layer (lo))
     {
       fuse_reply_err (req, EXDEV);
       return;
@@ -3631,7 +3624,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
           return;
         }
 
-      if (node->layer != get_upper_layer (lo) || node->present_lowerdir)
+      if (node->layer != get_upper_layer (lo) || node->last_layer != get_upper_layer (lo))
         {
           fuse_reply_err (req, EXDEV);
           return;
