@@ -4058,6 +4058,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   ino_t ino = 0;
   int ret = 0;
   char *path;
+  bool need_delete_whiteout = true;
   cleanup_lock int l = enter_big_lock ();
 
   if (UNLIKELY (ovl_debug (req)))
@@ -4084,6 +4085,9 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, errno);
       return;
     }
+
+  if (pnode->loaded && node == NULL)
+    need_delete_whiteout = false;
 
   parent_upperdir_only = pnode->last_layer == get_upper_layer (lo);
 
@@ -4137,7 +4141,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
         }
     }
 
-  if (delete_whiteout (lo, -1, pnode, name) < 0)
+  if (need_delete_whiteout && delete_whiteout (lo, -1, pnode, name) < 0)
     {
       fuse_reply_err (req, errno);
       return;
