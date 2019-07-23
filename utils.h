@@ -54,4 +54,7 @@ cleanup_dirp (DIR **p)
 # define cleanup_close __attribute__((cleanup (cleanup_closep)))
 # define cleanup_dir __attribute__((cleanup (cleanup_dirp)))
 
+# define LIKELY(x) __builtin_expect((x),1)
+# define UNLIKELY(x) __builtin_expect((x),0)
+
 #endif
