@@ -210,8 +210,9 @@ struct ovl_node
   int lookups;
   int hidden_dirfd;
   int nlinks;
-  ino_t ino;
+  mode_t mode;
   size_t name_hash;
+  ino_t ino;
 
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
@@ -883,6 +884,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
             st->st_nlink++;
         }
       node->nlinks = st->st_nlink;
+      node->mode = st->st_mode;
     }
 
   return ret;
