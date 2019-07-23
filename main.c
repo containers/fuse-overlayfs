@@ -2144,7 +2144,7 @@ static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 
 static int
 create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
-                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode)
+                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, struct stat *st_out)
 {
   int ret;
   cleanup_close int dfd = -1;
@@ -2183,6 +2183,13 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
         }
 
       ret = copy_xattr (xattr_sfd, dfd, buf, buf_size);
+      if (ret < 0)
+        goto out;
+    }
+
+  if (st_out)
+    {
+      ret = fstat (dfd, st_out);
       if (ret < 0)
         goto out;
     }
@@ -2233,7 +2240,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   times[0] = st.st_atim;
   times[1] = st.st_mtim;
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, NULL);
   if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
@@ -4021,14 +4028,17 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
 static void
 ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 {
-  cleanup_lock int l = enter_big_lock ();
-  struct ovl_node *node;
+  const struct fuse_ctx *ctx = fuse_req_ctx (req);
   struct ovl_data *lo = ovl_data (req);
+  struct fuse_entry_param e;
+  bool parent_upperdir_only;
   struct ovl_node *pnode;
+  struct ovl_node *node;
+  struct stat st;
+  ino_t ino = 0;
   int ret = 0;
   char *path;
-  struct fuse_entry_param e;
-  const struct fuse_ctx *ctx = fuse_req_ctx (req);
+  cleanup_lock int l = enter_big_lock ();
 
   if (ovl_debug (req))
     fprintf (stderr, "ovl_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
@@ -4054,6 +4064,9 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, errno);
       return;
     }
+
+  parent_upperdir_only = pnode->last_layer == get_upper_layer (lo);
+
   ret = asprintf (&path, "%s/%s", pnode->path, name);
   if (ret < 0)
     {
@@ -4062,14 +4075,19 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     }
 
   ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
-                          get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask);
+                          get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask,
+                          parent_upperdir_only ? &st : NULL);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, true, pnode, lo->fast_ino_check);
+  /* if the parent is on the upper layer, it doesn't need to lookup the ino in the lower layers.  */
+  if (parent_upperdir_only)
+    ino = st.st_ino;
+
+  node = make_ovl_node (path, get_upper_layer (lo), name, ino, true, pnode, lo->fast_ino_check);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -4082,11 +4100,21 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, ENOMEM);
       return;
     }
-  ret = hide_all (lo, node);
-  if (ret < 0)
+
+  if (parent_upperdir_only)
     {
-      fuse_reply_err (req, errno);
-      return;
+      node->last_layer = pnode->last_layer;
+      node->loaded = 1;
+      node->no_security_capability = 1;
+    }
+  else
+    {
+      ret = hide_all (lo, node);
+      if (ret < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
     }
 
   if (delete_whiteout (lo, -1, pnode, name) < 0)
