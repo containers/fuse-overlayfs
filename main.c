@@ -1149,7 +1149,10 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
             continue;
 
           if (fstat (fd, &st) == 0)
-            ret->ino = st.st_ino;
+            {
+              ret->ino = st.st_ino;
+              ret->last_layer = it;
+            }
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
@@ -1322,6 +1325,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           child = hash_lookup (n->children, &key);
           if (child)
             {
+              child->last_layer = it;
               if (child->whiteout && it == upper_layer)
                 {
                   hash_delete (n->children, child);
@@ -1386,13 +1390,13 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
               else
                 {
-
                   child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n, lo->fast_ino_check);
                   if (child == NULL)
                     {
                       errno = ENOMEM;
                       return NULL;
                     }
+                  child->last_layer = it;
                 }
             }
 
