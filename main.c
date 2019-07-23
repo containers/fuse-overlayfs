@@ -1870,19 +1870,13 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
       {
         int ret;
         size_t entsize;
-        struct stat st;
         const char *name;
         struct ovl_node *node = d->tbl[offset];
+        struct fuse_entry_param e;
+        struct stat *st = &e.attr;
 
         if (node == NULL || node->whiteout || node->hidden)
           continue;
-
-        ret = rpl_stat (req, node, -1, NULL, NULL, &st);
-        if (ret < 0)
-          {
-            fuse_reply_err (req, errno);
-            return;
-          }
 
         if (offset == 0)
           name = ".";
@@ -1896,17 +1890,28 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
           }
 
         if (!plus)
-          entsize = fuse_add_direntry (req, p, remaining, name, &st, offset + 1);
+          {
+            /* From the 'stbuf' argument the st_ino field and bits 12-15 of the
+             * st_mode field are used.  The other fields are ignored.
+             */
+            st->st_ino = node->ino;
+            st->st_mode = node->mode;
+
+            entsize = fuse_add_direntry (req, p, remaining, name, st, offset + 1);
+          }
         else
           {
-            struct fuse_entry_param e;
-
             memset (&e, 0, sizeof (e));
+            ret = rpl_stat (req, node, -1, NULL, NULL, st);
+            if (ret < 0)
+              {
+                fuse_reply_err (req, errno);
+                return;
+              }
+
             e.attr_timeout = get_timeout (lo);
             e.entry_timeout = get_timeout (lo);
             e.ino = NODE_TO_INODE (node);
-            memcpy (&e.attr, &st, sizeof (st));
-
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
             if (entsize <= remaining)
               {
