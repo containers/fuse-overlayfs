@@ -6,8 +6,8 @@ touch lower/a
 
 fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
 
-unlink lower/a
+unlink merged/a
 
-test \! -e lower/a
+test \! -e merged/a
 
 umount merged
