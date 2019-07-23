@@ -851,12 +851,14 @@ get_gid (struct ovl_data *data, gid_t id)
 }
 
 static int
-rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struct stat *st)
+rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struct stat *st_in, struct stat *st)
 {
-  int ret;
+  int ret = 0;
   struct ovl_data *data = ovl_data (req);
 
-  if (fd >= 0)
+  if (st_in)
+    memcpy (st, st_in, sizeof (* st));
+  else if (fd >= 0)
     ret = fstat (fd, st);
   else if (path != NULL)
     ret = stat (path, st);
@@ -1653,7 +1655,7 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
-  err = rpl_stat (req, node, -1, NULL, &e.attr);
+  err = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (err)
     {
       fuse_reply_err (req, errno);
@@ -1873,7 +1875,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
         if (node == NULL || node->whiteout || node->hidden)
           continue;
 
-        ret = rpl_stat (req, node, -1, NULL, &st);
+        ret = rpl_stat (req, node, -1, NULL, NULL, &st);
         if (ret < 0)
           {
             fuse_reply_err (req, errno);
@@ -2564,6 +2566,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *pnode;
   int ret = 0;
+  size_t whiteouts = 0;
   struct ovl_node key, *rm;
 
   node = do_lookup_file (lo, parent, name);
@@ -2585,7 +2588,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
           return;
         }
 
-      c = count_dir_entries (node, NULL);
+      c = count_dir_entries (node, &whiteouts);
       if (c)
         {
           fuse_reply_err (req, ENOTEMPTY);
@@ -2601,10 +2604,13 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
         node->do_unlink = 1;
       else
         {
-          if (empty_dir (lo, node) < 0)
+          if (whiteouts > 0)
             {
-              fuse_reply_err (req, errno);
-              return;
+              if (empty_dir (lo, node) < 0)
+                {
+                  fuse_reply_err (req, errno);
+                  return;
+                }
             }
 
           node->do_rmdir = 1;
@@ -2977,7 +2983,7 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node, i
 
   memset (e, 0, sizeof (*e));
 
-  err = rpl_stat (req, node, fd, path, &e->attr);
+  err = rpl_stat (req, node, fd, path, NULL, &e->attr);
   if (err < 0)
     return err;
 
@@ -3351,7 +3357,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
 
   memset (&e, 0, sizeof (e));
 
-  ret = rpl_stat (req, node, -1, NULL, &e.attr);
+  ret = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (ret)
     {
       fuse_reply_err (req, errno);
@@ -3455,7 +3461,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
 
   memset (&e, 0, sizeof (e));
 
-  ret = rpl_stat (req, node, -1, NULL, &e.attr);
+  ret = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (ret)
     {
       fuse_reply_err (req, errno);
@@ -4011,7 +4017,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
 
   memset (&e, 0, sizeof (e));
 
-  ret = rpl_stat (req, node, -1, NULL, &e.attr);
+  ret = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (ret)
     {
       fuse_reply_err (req, errno);
@@ -4125,7 +4131,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 
   memset (&e, 0, sizeof (e));
 
-  ret = rpl_stat (req, node, -1, NULL, &e.attr);
+  ret = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (ret)
     {
       fuse_reply_err (req, errno);
