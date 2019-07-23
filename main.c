@@ -1857,7 +1857,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
   char *p;
   cleanup_free char *buffer = NULL;
 
-  buffer = calloc (size, 1);
+  buffer = malloc (size);
   if (buffer == NULL)
     {
       fuse_reply_err (req, ENOMEM);
