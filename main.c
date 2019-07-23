@@ -759,10 +759,6 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 
   assert (node->layer == get_upper_layer (lo));
 
-  /* Might be leftover from a previous run.  */
-  unlinkat (lo->workdir_fd, newpath, 0);
-  unlinkat (lo->workdir_fd, newpath, AT_REMOVEDIR);
-
   if (unlink_src)
     {
       /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
