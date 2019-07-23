@@ -4180,7 +4180,7 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
 
   if (!lo->fsync)
     {
-      fuse_reply_err (req, 0);
+      fuse_reply_err (req, ENOSYS);
       return;
     }
 
