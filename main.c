@@ -761,29 +761,38 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 
   if (unlink_src)
     {
-      /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
-      if (!can_mknod || syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
-                                 newpath, RENAME_WHITEOUT) < 0)
+      bool moved = false;
+      bool whiteout_created = false;
+      bool needs_whiteout;
+
+      needs_whiteout = node->parent && node->parent->last_layer != get_upper_layer (lo);
+
+      if (needs_whiteout)
         {
-          if (node->parent)
+          /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
+          if (can_mknod && syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd, newpath, RENAME_WHITEOUT) == 0)
             {
-              /* If we are here, it means we have no permissions to use mknod.  Also
-                 since the file is not yet moved, creating a whiteout would fail on
-                 the mknodat call.  */
-              if (create_whiteout (lo, node->parent, node->name, true, false) < 0)
-                return -1;
+              whiteout_created = true;
+              moved = true;
             }
-          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
+
+          if (!whiteout_created)
             {
               if (node->parent)
                 {
-                  char whpath[PATH_MAX];
-
-                  strconcat3 (whpath, PATH_MAX, node->parent->path, "/.wh.", node->name);
-                  unlinkat (get_upper_layer (lo)->fd, whpath, 0);
+                  /* If we are here, it means we have no permissions to use mknod.  Also
+                     since the file is not yet moved, creating a whiteout would fail on
+                     the mknodat call.  */
+                  if (create_whiteout (lo, node->parent, node->name, true, false) < 0)
+                    return -1;
                 }
-              return -1;
             }
+        }
+
+      if (!moved)
+        {
+          if (renameat (node_dirfd (node), node->path, lo->workdir_fd, newpath) < 0)
+            return -1;
         }
     }
   else
