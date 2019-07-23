@@ -766,8 +766,8 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
   if (unlink_src)
     {
       /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
-      if (syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
-                   newpath, RENAME_WHITEOUT) < 0)
+      if (!can_mknod || syscall (SYS_renameat2, node_dirfd (node), node->path, lo->workdir_fd,
+                                 newpath, RENAME_WHITEOUT) < 0)
         {
           if (node->parent)
             {
