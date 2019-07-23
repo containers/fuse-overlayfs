@@ -1744,7 +1744,9 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   if (get_timeout (lo) > 0)
     {
       fi->keep_cache = 1;
+#if HAVE_FUSE_CACHE_READDIR
       fi->cache_readdir = 1;
+#endif
     }
   fuse_reply_open (req, fi);
   return;
