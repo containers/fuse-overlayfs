@@ -32,6 +32,29 @@ AC_DEFINE([USE_DIFF_HASH], 1, [Use the same hashing function as GNU diff])
 
 PKG_CHECK_MODULES([FUSE], [fuse3 >= 3.2.1], [AC_DEFINE([HAVE_FUSE], 1, [Define if libfuse is available])], [AC_MSG_ERROR([*** libfuse not found])]])
 
+old_CFLAGS=$CFLAGS
+old_LDFLAGS=$LDFLAGS
+CFLAGS=$pkg_cv_FUSE_CFLAGS
+LDFLAGS=$pkg_cv_FUSE_LDFLAGS
+AC_COMPILE_IFELSE(
+[
+AC_LANG_SOURCE([
+#define FUSE_USE_VERSION 32
+#include <fuse_lowlevel.h>
+void foo()
+{
+        struct fuse_file_info fi;
+        fi.cache_readdir = 1;
+}])
+],
+[cache_readdir=1],
+[cache_readdir=0])
+CFLAGS=$old_CFLAGS
+LDFLAGS=$old_LDFLAGS
+
+AC_DEFINE_UNQUOTED([HAVE_FUSE_CACHE_READDIR], $cache_readdir, [Define if libfuse is available])
+
+
 AC_FUNC_ERROR_AT_LINE
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([open_by_handle_at error memset strdup copy_file_range])
