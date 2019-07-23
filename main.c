@@ -2194,11 +2194,11 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
         goto out;
     }
 
-  unlinkat (dirfd, name, 0);
-
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
   if (ret < 0)
     {
+      if (errno == ENOTDIR)
+        unlinkat (dirfd, name, 0);
       if (errno == ENOENT && parent)
         {
           ret = create_node_directory (lo, parent);
