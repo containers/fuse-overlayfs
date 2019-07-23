@@ -4131,7 +4131,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 
   memset (&e, 0, sizeof (e));
 
-  ret = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
+  ret = rpl_stat (req, node, -1, NULL, parent_upperdir_only ? &st : NULL, &e.attr);
   if (ret)
     {
       fuse_reply_err (req, errno);
