@@ -2118,8 +2118,10 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
     fprintf (stderr, "ovl_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
-  ret = faccessat (node_dirfd (n), n->path, mask, AT_SYMLINK_NOFOLLOW);
-  fuse_reply_err (req, ret < 0 ? errno : 0);
+  if (mask & n->mode == mask)
+    fuse_reply_err (req, 0);
+  else
+    fuse_reply_err (req, EPERM);
 }
 
 static int
