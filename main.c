@@ -2933,6 +2933,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       struct ovl_node *p;
       const struct fuse_ctx *ctx = fuse_req_ctx (req);
       char wd_tmp_file_name[32];
+      bool need_delete_whiteout = true;
 
       if ((flags & O_CREAT) == 0)
         {
@@ -2951,6 +2952,9 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (p == NULL)
         return -1;
 
+      if (p->loaded && n == NULL)
+        need_delete_whiteout = false;
+
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
       ret = asprintf (&path, "%s/%s", p->path, name);
@@ -2964,7 +2968,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (fd < 0)
         return fd;
 
-      if (delete_whiteout (lo, -1, p, name) < 0)
+      if (need_delete_whiteout && delete_whiteout (lo, -1, p, name) < 0)
         return -1;
 
       n = make_ovl_node (path, get_upper_layer (lo), name, 0, false, p, lo->fast_ino_check);
