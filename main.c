@@ -2170,7 +2170,27 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   cleanup_close int dfd = -1;
   cleanup_free char *buf = NULL;
   char wd_tmp_file_name[32];
-  bool needs_open_fd;
+  bool need_rename;
+
+  need_rename = times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
+  if (!need_rename)
+    {
+      /* mkdir can be used directly without a temporary directory in the working directory.  */
+      ret = mkdirat (dirfd, name, mode);
+      if (ret < 0)
+        {
+          if (errno == EEXIST)
+            {
+              unlinkat (dirfd, name, 0);
+              ret = mkdirat (dirfd, name, mode);
+            }
+          if (ret < 0)
+            return ret;
+        }
+      if (st_out)
+        return fstatat (dirfd, name, st_out, AT_SYMLINK_NOFOLLOW);
+      return 0;
+    }
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
@@ -2178,14 +2198,9 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
-  needs_open_fd = times || xattr_sfd >= 0 || st_out || uid != lo->uid || gid != lo->gid;
-
-  if (needs_open_fd)
-    {
-      ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
-      if (ret < 0)
-        goto out;
-    }
+  ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
+  if (ret < 0)
+    goto out;
 
   if (uid != lo->uid || gid != lo->gid)
     {
