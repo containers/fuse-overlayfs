@@ -2889,7 +2889,7 @@ create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t 
 }
 
 static int
-ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode, struct ovl_node **retnode)
+ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode, struct ovl_node **retnode, struct stat *st)
 {
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *n;
@@ -2937,6 +2937,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       const struct fuse_ctx *ctx = fuse_req_ctx (req);
       char wd_tmp_file_name[32];
       bool need_delete_whiteout = true;
+      struct stat st_tmp;
 
       if ((flags & O_CREAT) == 0)
         {
@@ -2974,7 +2975,13 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (need_delete_whiteout && delete_whiteout (lo, -1, p, name) < 0)
         return -1;
 
-      n = make_ovl_node (path, get_upper_layer (lo), name, 0, false, p, lo->fast_ino_check);
+      if (st == NULL)
+        st = &st_tmp;
+
+      if (fstat (fd, st) < 0)
+        return -1;
+
+      n = make_ovl_node (path, get_upper_layer (lo), name, st->st_ino, false, p, lo->fast_ino_check);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -3092,6 +3099,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct fuse_entry_param e;
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node = NULL;
+  struct stat st;
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_create(parent=%" PRIu64 ", name=%s)\n",
@@ -3099,7 +3107,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   fi->flags = fi->flags | O_CREAT;
 
-  fd = ovl_do_open (req, parent, name, fi->flags, mode, &node);
+  fd = ovl_do_open (req, parent, name, fi->flags, mode, &node, &st);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -3128,7 +3136,7 @@ ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_open(ino=%" PRIu64 "s)\n", ino);
 
-  fd = ovl_do_open (req, ino, NULL, fi->flags, 0700, NULL);
+  fd = ovl_do_open (req, ino, NULL, fi->flags, 0700, NULL, NULL);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
