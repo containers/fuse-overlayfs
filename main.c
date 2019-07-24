@@ -3420,6 +3420,8 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
   const struct fuse_ctx *ctx = fuse_req_ctx (req);
   char wd_tmp_file_name[32];
   bool need_delete_whiteout = true;
+  uid_t uid;
+  gid_t gid;
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
@@ -3458,11 +3460,16 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  if (fchownat (lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), AT_SYMLINK_NOFOLLOW) < 0)
+  uid = get_uid (lo, ctx->uid);
+  gid = get_uid (lo, ctx->gid);
+  if (uid != lo->uid || gid != lo->gid)
     {
-      unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
-      fuse_reply_err (req, errno);
-      return;
+      if (fchownat (lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), AT_SYMLINK_NOFOLLOW) < 0)
+        {
+          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+          fuse_reply_err (req, errno);
+          return;
+        }
     }
 
   if (need_delete_whiteout && delete_whiteout (lo, -1, pnode, name) < 0)
