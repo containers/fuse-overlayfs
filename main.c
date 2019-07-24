@@ -2975,14 +2975,12 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (n == NULL)
         {
           errno = ENOMEM;
-          close (fd);
           return -1;
         }
       n = insert_node (p, n, true);
       if (n == NULL)
         {
           errno = ENOMEM;
-          close (fd);
           return -1;
         }
       ret = fd;
