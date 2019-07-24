@@ -2383,9 +2383,12 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (dfd < 0)
     goto exit;
 
-  ret = fchown (dfd, st.st_uid, st.st_gid);
-  if (ret < 0)
-      goto exit;
+  if (st.st_uid != lo->uid || st.st_gid != lo->gid)
+    {
+      ret = fchown (dfd, st.st_uid, st.st_gid);
+      if (ret < 0)
+        goto exit;
+    }
 
   buf = malloc (buf_size);
   if (buf == NULL)
