@@ -247,6 +247,10 @@ struct ovl_data
   int fast_ino_check;
   int writeback;
   int disable_xattrs;
+
+  /* current uid/gid*/
+  uid_t uid;
+  uid_t gid;
 };
 
 static double
@@ -2166,6 +2170,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   cleanup_close int dfd = -1;
   cleanup_free char *buf = NULL;
   char wd_tmp_file_name[32];
+  bool needs_open_fd;
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
@@ -2173,13 +2178,21 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
-  ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
-  if (ret < 0)
-    goto out;
+  needs_open_fd = times || xattr_sfd >= 0 || st_out || uid != lo->uid || gid != lo->gid;
 
-  ret = fchown (dfd, uid, gid);
-  if (ret < 0)
-    goto out;
+  if (needs_open_fd)
+    {
+      ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
+      if (ret < 0)
+        goto out;
+    }
+
+  if (uid != lo->uid || gid != lo->gid)
+    {
+      ret = fchown (dfd, uid, gid);
+      if (ret < 0)
+        goto out;
+    }
 
   if (times)
     {
@@ -4493,6 +4506,10 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "noatime") == 0)
     return 1;
+  if (strcmp (arg, "diratime") == 0)
+    return 1;
+  if (strcmp (arg, "nodiratime") == 0)
+    return 1;
   if (strcmp (arg, "splice_write") == 0)
     return 1;
   if (strcmp (arg, "splice_read") == 0)
@@ -4526,9 +4543,9 @@ get_new_args (int *argc, char **argv)
   char **newargv = malloc (sizeof (char *) * (*argc + 2));
   newargv[0] = argv[0];
   if (geteuid() == 0)
-    newargv[1] = "-odefault_permissions,allow_other,suid";
+    newargv[1] = "-odefault_permissions,allow_other,suid,noatime,lazytime";
   else
-    newargv[1] = "-odefault_permissions";
+    newargv[1] = "-odefault_permissions,noatime=1";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
@@ -4609,6 +4626,9 @@ main (int argc, char *argv[])
       fuse_lowlevel_version ();
       exit (EXIT_SUCCESS);
     }
+
+  lo.uid = geteuid ();
+  lo.gid = getegid ();
 
   if (lo.redirect_dir && strcmp (lo.redirect_dir, "off"))
     error (EXIT_FAILURE, 0, "fuse-overlayfs only supports redirect_dir=off");
