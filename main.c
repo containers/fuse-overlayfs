@@ -2850,6 +2850,16 @@ create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t 
   char wd_tmp_file_name[32];
   int ret;
 
+  /* try to create directly the file if it doesn't need to be chowned.  */
+  if (uid == lo->uid && gid == lo->gid)
+    {
+      ret = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
+      if (ret == 0)
+        return ret;
+      /* if it fails (e.g. there is a whiteout) then fallback to create it in
+         the working dir + rename.  */
+    }
+
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
   fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
