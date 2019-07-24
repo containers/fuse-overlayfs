@@ -2886,7 +2886,7 @@ create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t 
 }
 
 static int
-ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
+ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode, struct ovl_node **retnode)
 {
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *n;
@@ -2985,17 +2985,26 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
         }
       ret = fd;
       fd = -1; /*  We use a temporary variable so we don't close it at cleanup.  */
+      if (retnode)
+        *retnode = n;
       return ret;
     }
 
   /* readonly, we can use both lowerdir and upperdir.  */
   if (readonly)
-    return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
+    {
+      if (retnode)
+        *retnode = n;
+      return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
+    }
   else
     {
       n = get_node_up (lo, n);
       if (n == NULL)
         return -1;
+
+      if (retnode)
+        *retnode = n;
 
       return TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, flags, mode));
     }
@@ -3079,7 +3088,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   cleanup_close int fd = -1;
   struct fuse_entry_param e;
   struct ovl_data *lo = ovl_data (req);
-  struct ovl_node *node;
+  struct ovl_node *node = NULL;
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_create(parent=%" PRIu64 ", name=%s)\n",
@@ -3087,14 +3096,13 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   fi->flags = fi->flags | O_CREAT;
 
-  fd = ovl_do_open (req, parent, name, fi->flags, mode);
+  fd = ovl_do_open (req, parent, name, fi->flags, mode, &node);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  node = do_lookup_file (lo, parent, name);
   if (node == NULL || do_getattr (req, &e, node, fd, NULL) < 0)
     {
       fuse_reply_err (req, errno);
@@ -3117,7 +3125,7 @@ ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_open(ino=%" PRIu64 "s)\n", ino);
 
-  fd = ovl_do_open (req, ino, NULL, fi->flags, 0700);
+  fd = ovl_do_open (req, ino, NULL, fi->flags, 0700, NULL);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
