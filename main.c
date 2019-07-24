@@ -2844,6 +2844,38 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
 }
 
 static int
+create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t gid, int flags, mode_t mode)
+{
+  cleanup_close int fd = -1;
+  char wd_tmp_file_name[32];
+  int ret;
+
+  sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
+
+  fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
+  if (fd < 0)
+    return -1;
+  if (uid != lo->uid || gid != lo->gid)
+    {
+      if (fchown (fd, uid, gid) < 0)
+        {
+          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+          return -1;
+        }
+    }
+
+  if (renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, path) < 0)
+    {
+      unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+      return -1;
+    }
+
+  ret = fd;
+  fd = -1;
+  return ret;
+}
+
+static int
 ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mode_t mode)
 {
   struct ovl_data *lo = ovl_data (req);
@@ -2911,38 +2943,19 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-      fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode & ~ctx->umask));
-      if (fd < 0)
-        return -1;
+      ret = asprintf (&path, "%s/%s", p->path, name);
+      if (ret < 0)
+        return ret;
 
       uid = get_uid (lo, ctx->uid);
       gid = get_gid (lo, ctx->gid);
-      if (uid != lo->uid || gid != lo->gid)
-        {
-          if (fchown (fd, uid, gid) < 0)
-            {
-              unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
-              return -1;
-            }
-        }
 
-      ret = asprintf (&path, "%s/%s", p->path, name);
-      if (ret < 0)
-        {
-          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
-          return ret;
-        }
-      if (unlinkat (get_upper_layer (lo)->fd, path, 0) < 0 && errno != ENOENT)
-        return -1;
+      fd = create_file (lo, get_upper_layer (lo)->fd, path, uid, gid, flags, mode & ~ctx->umask);
+      if (fd < 0)
+        return fd;
 
       if (delete_whiteout (lo, -1, p, name) < 0)
         return -1;
-
-      if (renameat (lo->workdir_fd, wd_tmp_file_name, get_upper_layer (lo)->fd, path) < 0)
-        {
-          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
-          return -1;
-        }
 
       n = make_ovl_node (path, get_upper_layer (lo), name, 0, false, p, lo->fast_ino_check);
       if (n == NULL)
