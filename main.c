@@ -2837,6 +2837,8 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   cleanup_free char *path = NULL;
   cleanup_close int fd = -1;
   const struct fuse_ctx *ctx = fuse_req_ctx (req);
+  uid_t uid;
+  gid_t gid;
 
   flags |= O_NOFOLLOW;
 
@@ -2898,10 +2900,15 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (fd < 0)
         return -1;
 
-      if (fchown (fd, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid)) < 0)
+      uid = get_uid (lo, ctx->uid);
+      gid = get_gid (lo, ctx->gid);
+      if (uid != lo->uid || gid != lo->gid)
         {
-          unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
-          return -1;
+          if (fchown (fd, uid, gid) < 0)
+            {
+              unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+              return -1;
+            }
         }
 
       ret = asprintf (&path, "%s/%s", p->path, name);
