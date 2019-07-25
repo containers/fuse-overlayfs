@@ -1097,6 +1097,9 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
 
   buffer[s] == '\0';
 
+  if (s <= 0)
+    return s;
+
   /* Change owner.  */
   *ret = buffer;
   buffer = NULL;
