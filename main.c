@@ -1423,7 +1423,8 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         break;
     }
 
-  n->loaded = 1;
+  if (get_timeout (lo) > 0)
+    n->loaded = 1;
   return n;
 }
 
@@ -4221,7 +4222,8 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   if (parent_upperdir_only)
     {
       node->last_layer = pnode->last_layer;
-      node->loaded = 1;
+      if (get_timeout (lo) > 0)
+        node->loaded = 1;
       node->no_security_capability = 1;
     }
   else
