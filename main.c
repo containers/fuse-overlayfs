@@ -1241,9 +1241,9 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
       old = hash_delete (parent->children, item);
       if (old)
         {
-          node_free (old);
           if (node_dirp (old))
             parent->nlinks--;
+          node_free (old);
         }
     }
 
