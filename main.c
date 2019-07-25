@@ -2858,7 +2858,7 @@ create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t 
   if (uid == lo->uid && gid == lo->gid)
     {
       ret = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
-      if (ret == 0)
+      if (ret >= 0)
         return ret;
       /* if it fails (e.g. there is a whiteout) then fallback to create it in
          the working dir + rename.  */
