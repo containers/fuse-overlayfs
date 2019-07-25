@@ -4142,7 +4142,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   struct stat st;
   ino_t ino = 0;
   int ret = 0;
-  char *path;
+  cleanup_free char *path = NULL;
   bool need_delete_whiteout = true;
   cleanup_lock int l = enter_big_lock ();
 
