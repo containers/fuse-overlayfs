@@ -2858,7 +2858,7 @@ create_file (struct ovl_data *lo, int dirfd, const char *path, uid_t uid, gid_t 
   if (uid == lo->uid && gid == lo->gid)
     {
       ret = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
-      if (ret == 0)
+      if (ret >= 0)
         return ret;
       /* if it fails (e.g. there is a whiteout) then fallback to create it in
          the working dir + rename.  */
@@ -3592,8 +3592,8 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_data *lo = ovl_data (req);
   int ret;
   int saved_errno;
-  int srcfd = -1;
-  int destfd = -1;
+  cleanup_close int srcfd = -1;
+  cleanup_close int destfd = -1;
   struct ovl_node *rm1, *rm2;
   char *tmp;
 
@@ -3705,13 +3705,6 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   ret = -1;
 
  cleanup:
-  saved_errno = errno;
-  if (srcfd >= 0)
-    close (srcfd);
-  if (destfd >= 0)
-    close (destfd);
-  errno = saved_errno;
-
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
 
