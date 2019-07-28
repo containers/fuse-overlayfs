@@ -1157,17 +1157,30 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
+          bool stat_only = false;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
-          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_PATH));
+          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
           if (fd < 0)
-            continue;
+            {
+              /* It is a symlink, read only the ino.  */
+              if (errno == ELOOP && fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+                {
+                  ret->ino = st.st_ino;
+                  ret->last_layer = it;
+                }
+                goto no_fd;
+            }
 
+          /* It is an open FD, stat the file and read the origin xattrs.  */
           if (fstat (fd, &st) == 0)
             {
               ret->ino = st.st_ino;
               ret->last_layer = it;
             }
+
+          if (stat_only)
+            goto no_fd;
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
@@ -1211,6 +1224,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
               origin = NULL;
             }
 
+no_fd:
           if (parent && parent->last_layer == it)
             break;
           if (fast_ino_check)
