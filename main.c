@@ -2567,27 +2567,22 @@ update_paths (struct ovl_node *node)
 }
 
 static int
-empty_dir (struct ovl_data *lo, struct ovl_node *node)
+empty_dirfd (int fd)
 {
   cleanup_dir DIR *dp = NULL;
-  cleanup_close int cleanup_fd = -1;
   struct dirent *dent;
 
-  cleanup_fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
-  if (cleanup_fd < 0)
-    return -1;
-
-  if (set_fd_opaque (cleanup_fd) < 0)
-    return -1;
-
-  dp = fdopendir (cleanup_fd);
+  dp = fdopendir (fd);
   if (dp == NULL)
-    return -1;
-
-  cleanup_fd = -1;  /* It is not owned by dp.  */
+    {
+      close (fd);
+      return -1;
+    }
 
   for (;;)
     {
+      int ret;
+
       errno = 0;
       dent = readdir (dp);
       if (dent == NULL)
@@ -2601,11 +2596,57 @@ empty_dir (struct ovl_data *lo, struct ovl_node *node)
         continue;
       if (strcmp (dent->d_name, "..") == 0)
         continue;
-      if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
-        unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+
+      ret = unlinkat (dirfd (dp), dent->d_name, 0);
+      if (ret < 0 && errno == EISDIR)
+        {
+          ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+          if (ret < 0 && errno == ENOTEMPTY)
+            {
+              int dfd;
+
+              dfd = openat (dirfd (dp), dent->d_name, O_DIRECTORY);
+              if (dfd < 0)
+                return -1;
+
+              ret = empty_dirfd (dfd);
+              if (ret < 0)
+                return -1;
+
+              ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+              if (ret < 0)
+                return -1;
+
+              continue;
+            }
+        }
+      if (ret < 0)
+        return ret;
     }
 
   return 0;
+}
+
+static int
+empty_dir (struct ovl_data *lo, struct ovl_node *node)
+{
+  cleanup_dir DIR *dp = NULL;
+  cleanup_close int cleanup_fd = -1;
+  struct dirent *dent;
+  int ret;
+
+  cleanup_fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
+  if (cleanup_fd < 0)
+    return -1;
+
+  if (set_fd_opaque (cleanup_fd) < 0)
+    return -1;
+
+  ret = empty_dirfd (cleanup_fd);
+
+  cleanup_fd = -1;
+
+  return ret;
 }
 
 static void
@@ -3120,6 +3161,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+
   fi->fh = fd;
   fd = -1;  /* Do not clean it up.  */
 
@@ -4763,6 +4805,7 @@ main (int argc, char *argv[])
     error (EXIT_FAILURE, 0, "workdir not specified");
   else
     {
+      int dfd;
       cleanup_free char *path = NULL;
 
       path = realpath (lo.workdir, NULL);
@@ -4777,6 +4820,9 @@ main (int argc, char *argv[])
       lo.workdir_fd = open (lo.workdir, O_DIRECTORY);
       if (lo.workdir_fd < 0)
         error (EXIT_FAILURE, errno, "cannot open workdir");
+
+      dfd = dup (lo.workdir_fd);
+      empty_dirfd (dfd);
     }
 
   umask (0);
