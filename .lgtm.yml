@@ -1,0 +1,16 @@
+extraction:
+  cpp:
+    prepare:
+      packages:
+        - xz-utils
+        - ninja-build
+        - meson
+        - libudev-dev
+        - libudev1
+        - udev
+    after_prepare:
+        - (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.6.2/fuse-3.6.2.tar.xz; tar xf fuse-3.6.2.tar.xz; cd fuse-3.6.2; mkdir build; cd build; meson .. --prefix $LGTM_WORKSPACE/usr && ninja && ninja -j1 install || true)
+    configure:
+        command:
+        - ./autogen.sh
+        - ./configure PKG_CONFIG_PATH=$LGTM_WORKSPACE/usr/lib/x86_64-linux-gnu/pkgconfig
