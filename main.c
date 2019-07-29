@@ -1095,10 +1095,10 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
       buffer = tmp;
     }
 
-  buffer[s] == '\0';
-
   if (s <= 0)
     return s;
+
+  buffer[s] = '\0';
 
   /* Change owner.  */
   *ret = buffer;
@@ -1148,26 +1148,39 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
     {
       struct stat st;
       struct ovl_layer *it;
-      cleanup_free char *path = NULL;
+      cleanup_free char *npath = NULL;
 
-      path = strdup (ret->path);
-      if (path == NULL)
+      npath = strdup (ret->path);
+      if (npath == NULL)
         return NULL;
 
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
+          bool stat_only = false;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
-          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_PATH));
+          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
           if (fd < 0)
-            continue;
+            {
+              /* It is a symlink, read only the ino.  */
+              if (errno == ELOOP && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
+                {
+                  ret->ino = st.st_ino;
+                  ret->last_layer = it;
+                }
+                goto no_fd;
+            }
 
+          /* It is an open FD, stat the file and read the origin xattrs.  */
           if (fstat (fd, &st) == 0)
             {
               ret->ino = st.st_ino;
               ret->last_layer = it;
             }
+
+          if (stat_only)
+            goto no_fd;
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
@@ -1206,11 +1219,12 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           s = safe_read_xattr (&origin, fd, ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
             {
-              free (path);
-              path = origin;
+              free (npath);
+              npath = origin;
               origin = NULL;
             }
 
+no_fd:
           if (parent && parent->last_layer == it)
             break;
           if (fast_ino_check)
@@ -2567,27 +2581,22 @@ update_paths (struct ovl_node *node)
 }
 
 static int
-empty_dir (struct ovl_data *lo, struct ovl_node *node)
+empty_dirfd (int fd)
 {
   cleanup_dir DIR *dp = NULL;
-  cleanup_close int cleanup_fd = -1;
   struct dirent *dent;
 
-  cleanup_fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
-  if (cleanup_fd < 0)
-    return -1;
-
-  if (set_fd_opaque (cleanup_fd) < 0)
-    return -1;
-
-  dp = fdopendir (cleanup_fd);
+  dp = fdopendir (fd);
   if (dp == NULL)
-    return -1;
-
-  cleanup_fd = -1;  /* It is not owned by dp.  */
+    {
+      close (fd);
+      return -1;
+    }
 
   for (;;)
     {
+      int ret;
+
       errno = 0;
       dent = readdir (dp);
       if (dent == NULL)
@@ -2601,11 +2610,57 @@ empty_dir (struct ovl_data *lo, struct ovl_node *node)
         continue;
       if (strcmp (dent->d_name, "..") == 0)
         continue;
-      if (unlinkat (dirfd (dp), dent->d_name, 0) < 0)
-        unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+
+      ret = unlinkat (dirfd (dp), dent->d_name, 0);
+      if (ret < 0 && errno == EISDIR)
+        {
+          ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+          if (ret < 0 && errno == ENOTEMPTY)
+            {
+              int dfd;
+
+              dfd = openat (dirfd (dp), dent->d_name, O_DIRECTORY);
+              if (dfd < 0)
+                return -1;
+
+              ret = empty_dirfd (dfd);
+              if (ret < 0)
+                return -1;
+
+              ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+              if (ret < 0)
+                return -1;
+
+              continue;
+            }
+        }
+      if (ret < 0)
+        return ret;
     }
 
   return 0;
+}
+
+static int
+empty_dir (struct ovl_data *lo, struct ovl_node *node)
+{
+  cleanup_dir DIR *dp = NULL;
+  cleanup_close int cleanup_fd = -1;
+  struct dirent *dent;
+  int ret;
+
+  cleanup_fd = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, node->path, O_DIRECTORY));
+  if (cleanup_fd < 0)
+    return -1;
+
+  if (set_fd_opaque (cleanup_fd) < 0)
+    return -1;
+
+  ret = empty_dirfd (cleanup_fd);
+
+  cleanup_fd = -1;
+
+  return ret;
 }
 
 static void
@@ -3120,6 +3175,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+
   fi->fh = fd;
   fd = -1;  /* Do not clean it up.  */
 
@@ -4355,8 +4411,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
     {
     case FS_IOC_GETVERSION:
     case FS_IOC_GETFLAGS:
-      if (fi->fh >= 0)
-        fd = fi->fh;
+      fd = fi->fh;
       break;
 
     case FS_IOC_SETVERSION:
@@ -4478,7 +4533,7 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
     }
 
   fd_dest = TEMP_FAILURE_RETRY (openat (node_dirfd (dnode), dnode->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY));
-  if (fd < 0)
+  if (fd_dest < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -4763,6 +4818,7 @@ main (int argc, char *argv[])
     error (EXIT_FAILURE, 0, "workdir not specified");
   else
     {
+      int dfd;
       cleanup_free char *path = NULL;
 
       path = realpath (lo.workdir, NULL);
@@ -4777,6 +4833,9 @@ main (int argc, char *argv[])
       lo.workdir_fd = open (lo.workdir, O_DIRECTORY);
       if (lo.workdir_fd < 0)
         error (EXIT_FAILURE, errno, "cannot open workdir");
+
+      dfd = dup (lo.workdir_fd);
+      empty_dirfd (dfd);
     }
 
   umask (0);
