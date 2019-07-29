@@ -1095,10 +1095,10 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
       buffer = tmp;
     }
 
-  buffer[s] == '\0';
-
   if (s <= 0)
     return s;
+
+  buffer[s] = '\0';
 
   /* Change owner.  */
   *ret = buffer;
@@ -1148,10 +1148,10 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
     {
       struct stat st;
       struct ovl_layer *it;
-      cleanup_free char *path = NULL;
+      cleanup_free char *npath = NULL;
 
-      path = strdup (ret->path);
-      if (path == NULL)
+      npath = strdup (ret->path);
+      if (npath == NULL)
         return NULL;
 
       for (it = layer; it; it = it->next)
@@ -1160,11 +1160,11 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           bool stat_only = false;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
-          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, path, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
+          cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
           if (fd < 0)
             {
               /* It is a symlink, read only the ino.  */
-              if (errno == ELOOP && fstatat (it->fd, path, &st, AT_SYMLINK_NOFOLLOW) == 0)
+              if (errno == ELOOP && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
                 {
                   ret->ino = st.st_ino;
                   ret->last_layer = it;
@@ -1219,8 +1219,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           s = safe_read_xattr (&origin, fd, ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
             {
-              free (path);
-              path = origin;
+              free (npath);
+              npath = origin;
               origin = NULL;
             }
 
@@ -4411,8 +4411,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
     {
     case FS_IOC_GETVERSION:
     case FS_IOC_GETFLAGS:
-      if (fi->fh >= 0)
-        fd = fi->fh;
+      fd = fi->fh;
       break;
 
     case FS_IOC_SETVERSION:
@@ -4534,7 +4533,7 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
     }
 
   fd_dest = TEMP_FAILURE_RETRY (openat (node_dirfd (dnode), dnode->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY));
-  if (fd < 0)
+  if (fd_dest < 0)
     {
       fuse_reply_err (req, errno);
       return;

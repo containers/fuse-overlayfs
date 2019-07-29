@@ -1215,7 +1215,6 @@ hash_print (const Hash_table *table)
       for (cursor = bucket; cursor; cursor = cursor->next)
         {
           char const *s = cursor->data;
-          /* FIXME */
           if (s)
             printf ("  %s\n", s);
         }
