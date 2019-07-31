@@ -2154,7 +2154,7 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 static int
 copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 {
-  size_t xattr_len;
+  ssize_t xattr_len;
 
   xattr_len = flistxattr (sfd, buf, buf_size);
   if (xattr_len > 0)
