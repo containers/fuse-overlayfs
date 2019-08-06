@@ -14,20 +14,42 @@ BuildRequires: fuse3-devel
 Requires: fuse3
 
 %description
-fuse-overlayfs is a FUSE overlayfs implementation.
+%{summary}.
+
+%package devel
+Summary: %{summary}
+BuildArch: noarch
+
+%description devel
+%{summary}
+
+This package contains library source intended for
+building other packages which use import path with
+%{import_path} prefix.
 
 %prep
 %autosetup -n %{name}-%{version}
 
 %build
-env NOCONFIGURE=1 ./autogen.sh
-%configure --disable-silent-rules
-
-%make_build
+./autogen.sh
+./configure --prefix=%{_usr} --libdir=%{_libdir}
+%{__make}
 
 %install
-%make_install INSTALL="install -p"
+make DESTDIR=%{buildroot} install
+install -d %{buildroot}%{_usr}/lib/modules-load.d
+echo fuse > %{buildroot}%{_usr}/lib/modules-load.d/fuse-overlayfs.conf
+
+%post
+modprobe fuse > /dev/null 2>&1 || :
+
+%check
+
+#define license tag if not already defined
+%{!?_licensedir:%global license %doc}
 
 %files
 %license COPYING
 %{_bindir}/%{name}
+%{_mandir}/man1/*
+%{_usr}/lib/modules-load.d/fuse-overlayfs.conf
