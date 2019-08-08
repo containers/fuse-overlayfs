@@ -1605,7 +1605,6 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
             }
 
           strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
-
           ret = file_exists_at (it->fd, whpath);
           if (ret < 0 && errno != ENOENT)
             return NULL;
@@ -3245,8 +3244,8 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   uid_t uid;
   gid_t gid;
   int ret;
-  int fd;
-  char proc_path[PATH_MAX];
+  int fd = -1;
+  char path[PATH_MAX];
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
@@ -3274,20 +3273,28 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     fd = fi->fh;  // use existing fd if fuse_file_info is available
   else
     {
+      struct stat st;
       int dirfd = node_dirfd (node);
 
-      cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|O_WRONLY));
-      if (fd < 0)
+      ret = fstatat (dirfd, node->path, &st, AT_SYMLINK_NOFOLLOW);
+      if (ret < 0)
         {
-          if (errno == EISDIR)
-            goto handle_eisdir;
-          if (errno == ELOOP)
-            goto handle_eloop;
-
           fuse_reply_err (req, errno);
           return;
+        }
 
-handle_eisdir:
+      switch (st.st_mode & S_IFMT)
+        {
+        case S_IFREG:
+          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|O_WRONLY));
+          if (fd < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
+          break;
+
+        case S_IFDIR:
           cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK));
           if (fd < 0)
             {
@@ -3296,16 +3303,22 @@ handle_eisdir:
                   fuse_reply_err (req, errno);
                   return;
                 }
-handle_eloop:
-              /* It is a symlink and it cannot be used directly.  Fallback to the /proc/fd/$FD path.  */
-              cleaned_up_fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_PATH|O_NOFOLLOW|O_NONBLOCK));
-              if (cleaned_up_fd < 0)
-                {
-                  fuse_reply_err (req, errno);
-                  return;
-                }
-              sprintf (proc_path, "/proc/self/fd/%d", cleaned_up_fd);
             }
+          break;
+
+        case S_IFLNK:
+          cleaned_up_fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_PATH|O_NOFOLLOW|O_NONBLOCK));
+          if (cleaned_up_fd < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
+          sprintf (path, "/proc/self/fd/%d", cleaned_up_fd);
+          break;
+
+        default:
+          strconcat3 (path, PATH_MAX, get_upper_layer (lo)->path, "/", node->path);
+          break;
         }
     }
 
@@ -3329,7 +3342,7 @@ handle_eloop:
       if (fd >= 0)
         ret = futimens (fd, times);
       else
-        ret = utimensat (AT_FDCWD, proc_path, times, AT_SYMLINK_NOFOLLOW);
+        ret = utimensat (AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3342,7 +3355,7 @@ handle_eloop:
       if (fd >= 0)
         ret = fchmod (fd, attr->st_mode);
       else
-        ret = chmod (proc_path, attr->st_mode);
+        ret = chmod (path, attr->st_mode);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3355,7 +3368,7 @@ handle_eloop:
       if (fd >= 0)
         ret = ftruncate (fd, attr->st_size);
       else
-        ret = truncate (proc_path, attr->st_size);
+        ret = truncate (path, attr->st_size);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3375,7 +3388,7 @@ handle_eloop:
       if (fd >= 0)
         ret = fchown (fd, uid, gid);
       else
-        ret = chown (proc_path, uid, gid);
+        ret = chown (path, uid, gid);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3383,7 +3396,7 @@ handle_eloop:
         }
     }
 
-  if (do_getattr (req, &e, node, fd, proc_path) < 0)
+  if (do_getattr (req, &e, node, fd, path) < 0)
     {
       fuse_reply_err (req, errno);
       return;
