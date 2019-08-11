@@ -893,7 +893,6 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
             st->st_nlink++;
         }
       node->nlinks = st->st_nlink;
-      node->mode = st->st_mode;
     }
 
   return ret;
@@ -1167,6 +1166,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
               if (errno == ELOOP && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
                 {
                   ret->ino = st.st_ino;
+                  ret->mode = st.st_mode;
                   ret->last_layer = it;
                 }
                 goto no_fd;
@@ -1176,6 +1176,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           if (fstat (fd, &st) == 0)
             {
               ret->ino = st.st_ino;
+              ret->mode = st.st_mode;
               ret->last_layer = it;
             }
 
@@ -1209,6 +1210,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
                       if (fstat (originfd, &st) == 0)
                         {
                           ret->ino = st.st_ino;
+                          ret->mode = st.st_mode;
                           break;
                         }
                     }
@@ -3273,17 +3275,23 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     fd = fi->fh;  // use existing fd if fuse_file_info is available
   else
     {
-      struct stat st;
+      mode_t mode = node->mode;
       int dirfd = node_dirfd (node);
 
-      ret = fstatat (dirfd, node->path, &st, AT_SYMLINK_NOFOLLOW);
-      if (ret < 0)
+      if (mode == 0)
         {
-          fuse_reply_err (req, errno);
-          return;
+          struct stat st;
+
+          ret = fstatat (dirfd, node->path, &st, AT_SYMLINK_NOFOLLOW);
+          if (ret < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
+          node->mode = mode = st.st_mode;
         }
 
-      switch (st.st_mode & S_IFMT)
+      switch (mode & S_IFMT)
         {
         case S_IFREG:
           cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|O_WRONLY));
