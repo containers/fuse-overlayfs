@@ -45,5 +45,11 @@ fuse-overlayfs -o fast_ino_check=1,sync=0,lowerdir=lower,upperdir=upper,workdir=
 
 docker run --rm -ti -v $(pwd)/merged:/merged centos:6 yum --installroot /merged -y --releasever 6 install nano
 
+mkdir merged/a-directory
+
+setfattr -n user.foo -v bar merged/a-directory
+getfattr -d merged/a-directory | grep bar
+getfattr --only-values -n user.foo merged/a-directory | grep bar
+getfattr --only-values -n user.foo upper/a-directory | grep bar
 
 umount merged
