@@ -2038,7 +2038,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
     }
 
   path[0] = '\0';
-  ret = open_fd_or_get_path (lo, node, path, &fd, O_WRONLY);
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_RDONLY);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
