@@ -554,7 +554,7 @@ open_fd_or_get_path (struct ovl_data *lo, struct ovl_node *n, char *path, int *f
   path[0] = '\0';
 
   *fd = TEMP_FAILURE_RETRY (openat (node_dirfd (n), n->path, O_NONBLOCK|O_NOFOLLOW|mode));
-  if (*fd < 0 && errno == ELOOP)
+  if (*fd < 0 && (errno == ELOOP || errno == EISDIR))
     {
       get_node_path (lo, n, path);
       return 0;
@@ -2038,7 +2038,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
     }
 
   path[0] = '\0';
-  ret = open_fd_or_get_path (lo, node, path, &fd, O_WRONLY);
+  ret = open_fd_or_get_path (lo, node, path, &fd, O_RDONLY);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
