@@ -28,9 +28,9 @@ before_install:
   - (wget https://dl.google.com/go/go1.10.8.linux-amd64.tar.gz && tar xf go1.10.8.linux-amd64.tar.gz && sudo mv go /usr/local)
   - sudo mkdir -p /lower /upper /mnt
   - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
-  - (git clone git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
-  - (git clone -b 0.51.1 https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
-  - (git clone https://github.com/sstephenson/bats.git; cd bats; sudo ./install.sh /usr/local)
+  - (git clone --depth 1 git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
+  - (git clone --depth 1 -b 0.51.1 https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
+  - (git clone --depth 1 https://github.com/sstephenson/bats.git; cd bats; sudo ./install.sh /usr/local)
   - (go get github.com/containers/storage; cd $GOPATH/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := exclude_graphdriver_devicemapper exclude_graphdriver_btrfs|' Makefile; make GO=$GO containers-storage)
   - (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.6.2/fuse-3.6.2.tar.xz; tar xf fuse-3.6.2.tar.xz; cd fuse-3.6.2; mkdir build; cd build; meson .. --prefix /usr && ninja && sudo ninja install)
 script:
