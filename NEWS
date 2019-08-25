@@ -1,0 +1,5 @@
+* fuse-overlayfs-0.6
+
+- fix an issue where changes to an inode would not be visible from another hard link.
+  The issue was always present but was made easier to reproduce with fuse-overlayfs 0.5
+  that enables FUSE writeback by default.

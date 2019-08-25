@@ -166,8 +166,6 @@ file_exists_at (int dirfd, const char *pathname)
 # define FICLONE _IOW (0x94, 9, int)
 #endif
 
-#define NODE_TO_INODE(x) ((fuse_ino_t) x)
-
 #if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 6) && !defined __cplusplus
 _Static_assert (sizeof (fuse_ino_t) >= sizeof (uintptr_t),
 		"fuse_ino_t too small to hold uintptr_t values!");
@@ -200,19 +198,29 @@ struct ovl_mapping
   unsigned int len;
 };
 
+struct ovl_ino
+{
+  struct ovl_node *node;
+  ino_t ino;
+  int lookups;
+  mode_t mode;
+  int nlinks;
+};
+
 struct ovl_node
 {
   struct ovl_node *parent;
   Hash_table *children;
   struct ovl_layer *layer, *last_layer;
+  ino_t tmp_ino;
   char *path;
   char *name;
-  int lookups;
   int hidden_dirfd;
-  int nlinks;
-  mode_t mode;
+  int node_lookups;
   size_t name_hash;
-  ino_t ino;
+  Hash_table *inodes;
+  struct ovl_ino *ino;
+  struct ovl_node *next_link;
 
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
@@ -238,6 +246,8 @@ struct ovl_data
   int workdir_fd;
   int debug;
   struct ovl_layer *layers;
+
+  Hash_table *inodes;
 
   struct ovl_node *root;
   char *timeout_str;
@@ -323,6 +333,34 @@ get_next_wd_counter ()
 {
   static unsigned long counter = 1;
   return counter++;
+}
+
+static ino_t
+node_to_inode (struct ovl_node *n)
+{
+  return n->tmp_ino;
+}
+
+static struct ovl_ino *
+lookup_inode (struct ovl_data *lo, ino_t n)
+{
+  struct ovl_ino *ret;
+  struct ovl_ino key;
+  key.ino = n;
+
+  return hash_lookup (lo->inodes, &key);
+}
+
+static struct ovl_node *
+inode_to_node (struct ovl_data *lo, ino_t n)
+{
+  struct ovl_ino *ret;
+
+  ret = lookup_inode (lo, n);
+  if (ret == NULL)
+    return NULL;
+
+  return ret->node;
 }
 
 static int
@@ -751,6 +789,187 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
   return 0;
 }
 
+static unsigned int
+find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool uid)
+{
+  if (mapping == NULL)
+    return id;
+  for (; mapping; mapping = mapping->next)
+    {
+      if (direct)
+        {
+          if (id >= mapping->host && id < mapping->host + mapping->len)
+            return mapping->to + (id - mapping->host);
+        }
+      else
+        {
+          if (id >= mapping->to && id < mapping->to + mapping->len)
+            return mapping->host + (id - mapping->to);
+        }
+    }
+  return uid ? overflow_uid : overflow_gid;
+}
+
+static uid_t
+get_uid (struct ovl_data *data, uid_t id)
+{
+  return find_mapping (id, data->uid_mappings, false, false);
+}
+
+static uid_t
+get_gid (struct ovl_data *data, gid_t id)
+{
+  return find_mapping (id, data->gid_mappings, false, false);
+}
+
+static int
+rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struct stat *st_in, struct stat *st)
+{
+  int ret = 0;
+  struct ovl_data *data = ovl_data (req);
+
+  if (st_in)
+    memcpy (st, st_in, sizeof (* st));
+  else if (fd >= 0)
+    ret = fstat (fd, st);
+  else if (path != NULL)
+    ret = stat (path, st);
+  else
+    ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
+  if (ret < 0)
+    return ret;
+
+  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
+  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
+
+  st->st_ino = node->tmp_ino;
+  if (ret == 0 && node_dirp (node) && node->ino->nlinks <= 0)
+    {
+      struct ovl_node *it;
+
+      st->st_nlink = 2;
+
+      for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+        {
+          if (node_dirp (it))
+            st->st_nlink++;
+        }
+      node->ino->nlinks = st->st_nlink;
+    }
+
+  return ret;
+}
+
+static void
+node_mark_all_free (void *p)
+{
+  struct ovl_node *it, *tmp, *n = (struct ovl_node *) p;
+
+  for (it = n->next_link; it; it = it->next_link)
+    it->ino->lookups = 0;
+
+  n->ino->lookups = 0;
+
+  if (n->children)
+    {
+      for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
+        node_mark_all_free (it);
+    }
+}
+
+static void
+node_free (void *p)
+{
+  struct ovl_node *n = (struct ovl_node *) p;
+
+  if (n->parent)
+    {
+      if (hash_lookup (n->parent->children, n) == n)
+        hash_delete (n->parent->children, n);
+      n->parent->loaded = 0;
+      n->parent = NULL;
+    }
+
+  if (n->ino || n->node_lookups > 0)
+    return;
+
+  if (n->children)
+    {
+      struct ovl_node *it;
+
+      for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
+        it->parent = NULL;
+
+      hash_free (n->children);
+      n->children = NULL;
+    }
+
+  if (n->do_unlink)
+    unlinkat (n->hidden_dirfd, n->path, 0);
+  if (n->do_rmdir)
+    unlinkat (n->hidden_dirfd, n->path, AT_REMOVEDIR);
+
+  free (n->name);
+  free (n->path);
+  free (n);
+}
+
+static void
+inode_free (void *p)
+{
+  struct ovl_node *n, *tmp;
+  struct ovl_ino *i = (struct ovl_ino *) p;
+
+  n = i->node;
+  while (n)
+    {
+      tmp = n;
+      n = n->next_link;
+
+      tmp->ino = NULL;
+      node_free (tmp);
+  }
+
+  free (i);
+}
+
+static void
+drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
+{
+  struct ovl_ino *ino;
+  struct ovl_ino key;
+  struct ovl_node *it, *prev = NULL;
+  size_t len = 0;
+
+  key.ino = node->tmp_ino;
+
+  ino = hash_lookup (inodes, &key);
+  if (ino == NULL)
+    return;
+
+  for (it = ino->node; it; it = it->next_link)
+    len++;
+
+  if (len == 1 && node->ino->lookups > 0)
+    return;
+
+  node->ino = NULL;
+  ino->lookups -= node->node_lookups;
+
+  for (it = ino->node; it; it = it->next_link)
+    {
+      if (it == node)
+        {
+          if (prev)
+            prev->next_link = it->next_link;
+          else
+            ino->node = it->next_link;
+          break;
+        }
+      prev = it;
+    }
+}
+
 static int
 hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
@@ -812,12 +1031,16 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
             return -1;
         }
     }
+  drop_node_from_ino (lo->inodes, node);
+
   node->hidden_dirfd = lo->workdir_fd;
   free (node->path);
   node->path = newpath;
   newpath = NULL;  /* Do not auto cleanup.  */
 
   node->hidden = 1;
+  if (node->parent)
+    node->parent->loaded = 0;
   node->parent = NULL;
 
   if (node_dirp (node))
@@ -827,169 +1050,21 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
   return 0;
 }
 
-static unsigned int
-find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool uid)
+static size_t
+node_inode_hasher (const void *p, size_t s)
 {
-  if (mapping == NULL)
-    return id;
-  for (; mapping; mapping = mapping->next)
-    {
-      if (direct)
-        {
-          if (id >= mapping->host && id < mapping->host + mapping->len)
-            return mapping->to + (id - mapping->host);
-        }
-      else
-        {
-          if (id >= mapping->to && id < mapping->to + mapping->len)
-            return mapping->host + (id - mapping->to);
-        }
-    }
-  return uid ? overflow_uid : overflow_gid;
+  struct ovl_ino *n = (struct ovl_ino *) p;
+
+  return n->ino % s;
 }
 
-static uid_t
-get_uid (struct ovl_data *data, uid_t id)
+static bool
+node_inode_compare (const void *n1, const void *n2)
 {
-  return find_mapping (id, data->uid_mappings, false, false);
-}
+  struct ovl_ino *i1 = (struct ovl_ino *) n1;
+  struct ovl_ino *i2 = (struct ovl_ino *) n2;
 
-static uid_t
-get_gid (struct ovl_data *data, gid_t id)
-{
-  return find_mapping (id, data->gid_mappings, false, false);
-}
-
-static int
-rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struct stat *st_in, struct stat *st)
-{
-  int ret = 0;
-  struct ovl_data *data = ovl_data (req);
-
-  if (st_in)
-    memcpy (st, st_in, sizeof (* st));
-  else if (fd >= 0)
-    ret = fstat (fd, st);
-  else if (path != NULL)
-    ret = stat (path, st);
-  else
-    ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
-  if (ret < 0)
-    return ret;
-
-  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
-  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
-
-  st->st_ino = node->ino;
-  if (ret == 0 && node_dirp (node) && node->nlinks <= 0)
-    {
-      struct ovl_node *it;
-
-      st->st_nlink = 2;
-
-      for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
-        {
-          if (node_dirp (it))
-            st->st_nlink++;
-        }
-      node->nlinks = st->st_nlink;
-    }
-
-  return ret;
-}
-
-static void
-node_mark_all_free (void *p)
-{
-  struct ovl_node *it, *n = (struct ovl_node *) p;
-
-  n->lookups = 0;
-
-  if (n->children)
-    {
-      for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
-        node_mark_all_free (it);
-    }
-}
-
-static void
-node_free (void *p)
-{
-  struct ovl_node *n = (struct ovl_node *) p;
-  if (n->parent)
-    {
-      if (hash_lookup (n->parent->children, n) == n)
-        hash_delete (n->parent->children, n);
-      n->parent->loaded = 0;
-      n->parent = NULL;
-    }
-
-  if (n->lookups > 0)
-    return;
-
-  if (n->children)
-    {
-      struct ovl_node *it;
-
-      for (it = hash_get_first (n->children); it; it = hash_get_next (n->children, it))
-        it->parent = NULL;
-
-      hash_free (n->children);
-      n->children = NULL;
-    }
-
-  if (n->do_unlink)
-    unlinkat (n->hidden_dirfd, n->path, 0);
-  if (n->do_rmdir)
-    unlinkat (n->hidden_dirfd, n->path, AT_REMOVEDIR);
-
-  free (n->name);
-  free (n->path);
-  free (n);
-  return;
-}
-
-static void
-do_forget (fuse_ino_t ino, uint64_t nlookup)
-{
-  struct ovl_node *n;
-
-  if (ino == FUSE_ROOT_ID)
-    return;
-
-  n = (struct ovl_node *) ino;
-
-  n->lookups -= nlookup;
-  if (n->lookups <= 0)
-    node_free (n);
-}
-
-static void
-ovl_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
-{
-  cleanup_lock int l = enter_big_lock ();
-
-  if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
-	     ino, nlookup);
-  do_forget (ino, nlookup);
-  fuse_reply_none (req);
-}
-
-static void
-ovl_forget_multi (fuse_req_t req, size_t count, struct fuse_forget_data *forgets)
-{
-  size_t i;
-  cleanup_lock int l = enter_big_lock ();
-
-  if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_forget_multi(count=%zu, forgets=%p)\n",
-	     count, forgets);
-
-  for (i = 0; i < count; i++)
-    do_forget (forgets[i].ino, forgets[i].nlookup);
-
-  fuse_reply_none (req);
+  return i1->ino == i2->ino;
 }
 
 static size_t
@@ -1009,6 +1084,109 @@ node_compare (const void *n1, const void *n2)
     return false;
 
   return strcmp (node1->name, node2->name) == 0 ? true : false;
+}
+
+static struct ovl_node *
+register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
+{
+  int ret;
+  struct ovl_ino key;
+  struct ovl_ino *ino = NULL;
+
+  key.ino = n->tmp_ino;
+
+  /* Already registered.  */
+  if (n->ino)
+    return n;
+
+  ino = hash_lookup (lo->inodes, &key);
+  if (ino)
+    {
+      struct ovl_node *it;
+
+      for (it = ino->node; it; it = it->next_link)
+        {
+          if (n->parent == it->parent && node_compare (n, it))
+            {
+              node_free (n);
+              return it;
+            }
+        }
+
+      n->next_link = ino->node;
+      ino->node = n;
+      ino->mode = mode;
+      n->ino = ino;
+      return n;
+    }
+
+  ino = calloc (1, sizeof (*ino));
+  if (ino == NULL)
+    return NULL;
+
+  ino->ino = n->tmp_ino;
+  ino->node = n;
+  n->ino = ino;
+  ino->mode = mode;
+
+  if (hash_insert (lo->inodes, ino) == NULL)
+    {
+      free (ino);
+      node_free (n);
+      return NULL;
+    }
+
+  return ino->node;
+}
+
+static void
+do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
+{
+  struct ovl_ino *i;
+
+  if (ino == FUSE_ROOT_ID || ino == 0)
+    return;
+
+  i = lookup_inode (lo, ino);
+  if (i == NULL)
+    return;
+
+  i->lookups -= nlookup;
+  if (i->lookups <= 0)
+    {
+      hash_delete (lo->inodes, i);
+      inode_free (i);
+    }
+}
+
+static void
+ovl_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
+{
+  cleanup_lock int l = enter_big_lock ();
+  struct ovl_data *lo = ovl_data (req);
+
+  if (UNLIKELY (ovl_debug (req)))
+    fprintf (stderr, "ovl_forget(ino=%" PRIu64 ", nlookup=%lu)\n",
+	     ino, nlookup);
+  do_forget (lo, ino, nlookup);
+  fuse_reply_none (req);
+}
+
+static void
+ovl_forget_multi (fuse_req_t req, size_t count, struct fuse_forget_data *forgets)
+{
+  size_t i;
+  cleanup_lock int l = enter_big_lock ();
+  struct ovl_data *lo = ovl_data (req);
+
+  if (UNLIKELY (ovl_debug (req)))
+    fprintf (stderr, "ovl_forget_multi(count=%zu, forgets=%p)\n",
+	     count, forgets);
+
+  for (i = 0; i < count; i++)
+    do_forget (lo, forgets[i].ino, forgets[i].nlookup);
+
+  fuse_reply_none (req);
 }
 
 static inline void
@@ -1036,6 +1214,8 @@ node_set_name (struct ovl_node *node, char *name)
     node->name_hash = hash_string (name, SIZE_MAX);
 }
 
+static struct ovl_ino dummy_ino;
+
 static struct ovl_node *
 make_whiteout_node (const char *path, const char *name)
 {
@@ -1057,6 +1237,7 @@ make_whiteout_node (const char *path, const char *name)
     return NULL;
 
   ret->whiteout = 1;
+  ret->ino = &dummy_ino;
 
   ret_xchg = ret;
   ret = NULL;
@@ -1107,8 +1288,9 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
 }
 
 static struct ovl_node *
-make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent, bool fast_ino_check)
+make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, const char *name, ino_t ino, bool dir_p, struct ovl_node *parent, bool fast_ino_check)
 {
+  mode_t mode = 0;
   char *new_name;
   struct ovl_node *ret_xchg;
   cleanup_node_init struct ovl_node *ret = NULL;
@@ -1119,8 +1301,12 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
 
   ret->parent = parent;
   ret->layer = layer;
-  ret->ino = ino;
+  ret->tmp_ino = ino;
   ret->hidden_dirfd = -1;
+  ret->inodes = lo->inodes;
+  ret->next_link = NULL;
+  ret->ino = NULL;
+  ret->node_lookups = 0;
 
   new_name = strdup (name);
   if (new_name == NULL)
@@ -1143,7 +1329,7 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
         return NULL;
     }
 
-  if (ret->ino == 0)
+  if (ret->tmp_ino == 0)
     {
       struct stat st;
       struct ovl_layer *it;
@@ -1165,8 +1351,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
               /* It is a symlink, read only the ino.  */
               if (errno == ELOOP && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
                 {
-                  ret->ino = st.st_ino;
-                  ret->mode = st.st_mode;
+                  ret->tmp_ino = st.st_ino;
+                  mode = st.st_mode;
                   ret->last_layer = it;
                 }
                 goto no_fd;
@@ -1175,8 +1361,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
           /* It is an open FD, stat the file and read the origin xattrs.  */
           if (fstat (fd, &st) == 0)
             {
-              ret->ino = st.st_ino;
-              ret->mode = st.st_mode;
+              ret->tmp_ino = st.st_ino;
+              mode = st.st_mode;
               ret->last_layer = it;
             }
 
@@ -1209,8 +1395,8 @@ make_ovl_node (const char *path, struct ovl_layer *layer, const char *name, ino_
                     {
                       if (fstat (originfd, &st) == 0)
                         {
-                          ret->ino = st.st_ino;
-                          ret->mode = st.st_mode;
+                          ret->tmp_ino = st.st_ino;
+                          mode = st.st_mode;
                           break;
                         }
                     }
@@ -1237,7 +1423,7 @@ no_fd:
   ret_xchg = ret;
   ret = NULL;
 
-  return ret_xchg;
+  return register_inode (lo, ret_xchg, mode);
 }
 
 static struct ovl_node *
@@ -1252,7 +1438,7 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
       if (hash_lookup (prev_parent->children, item) == item)
         hash_delete (prev_parent->children, item);
       if (is_dir)
-        prev_parent->nlinks--;
+        prev_parent->ino->nlinks--;
     }
 
   if (replace)
@@ -1261,7 +1447,7 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
       if (old)
         {
           if (node_dirp (old))
-            parent->nlinks--;
+            parent->ino->nlinks--;
           node_free (old);
         }
     }
@@ -1281,7 +1467,7 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
 
   item->parent = parent;
   if (is_dir)
-    parent->nlinks++;
+    parent->ino->nlinks++;
 
   return item;
 }
@@ -1307,7 +1493,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
   if (!n)
     {
-      n = make_ovl_node (path, layer, name, 0, true, NULL, lo->fast_ino_check);
+      n = make_ovl_node (lo, path, layer, name, 0, true, NULL, lo->fast_ino_check);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -1418,7 +1604,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
               else
                 {
-                  child = make_ovl_node (node_path, it, dent->d_name, 0, dirp, n, lo->fast_ino_check);
+                  child = make_ovl_node (lo, node_path, it, dent->d_name, 0, dirp, n, lo->fast_ino_check);
                   if (child == NULL)
                     {
                       errno = ENOMEM;
@@ -1539,7 +1725,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
   if (parent == FUSE_ROOT_ID)
     pnode = lo->root;
   else
-    pnode = (struct ovl_node *) parent;
+    pnode = inode_to_node (lo, parent);
 
   if (name == NULL)
     return pnode;
@@ -1601,7 +1787,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           /* If we already know the node, simply update the ino.  */
           if (node)
             {
-              node->ino = st.st_ino;
+              node->tmp_ino = st.st_ino;
               node->last_layer = it;
               continue;
             }
@@ -1618,7 +1804,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
               if (wh_name)
                 node = make_whiteout_node (path, wh_name);
               else
-                node = make_ovl_node (path, it, name, 0, st.st_mode & S_IFDIR, pnode, lo->fast_ino_check);
+                node = make_ovl_node (lo, path, it, name, 0, st.st_mode & S_IFDIR, pnode, lo->fast_ino_check);
             }
           if (node == NULL)
             {
@@ -1692,8 +1878,8 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
-  e.ino = NODE_TO_INODE (node);
-  node->lookups++;
+  e.ino = node_to_inode (node);
+  node->ino->lookups++;
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
@@ -1765,7 +1951,8 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
   for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
     {
-      it->lookups++;
+      it->ino->lookups++;
+      it->node_lookups++;
       d->tbl[counter++] = it;
     }
 
@@ -1922,8 +2109,8 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             /* From the 'stbuf' argument the st_ino field and bits 12-15 of the
              * st_mode field are used.  The other fields are ignored.
              */
-            st->st_ino = node->ino;
-            st->st_mode = node->mode;
+            st->st_ino = node->tmp_ino;
+            st->st_mode = node->ino->mode;
 
             entsize = fuse_add_direntry (req, p, remaining, name, st, offset + 1);
           }
@@ -1939,13 +2126,13 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 
             e.attr_timeout = get_timeout (lo);
             e.entry_timeout = get_timeout (lo);
-            e.ino = NODE_TO_INODE (node);
+            e.ino = node_to_inode (node);
             entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
             if (entsize <= remaining)
               {
                 /* First two entries are . and .. */
                 if (offset >= 2)
-                  node->lookups++;
+                  node->ino->lookups++;
               }
           }
 
@@ -1984,14 +2171,21 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   cleanup_lock int l = enter_big_lock ();
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
+  struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
 
   for (s = 2; s < d->tbl_size; s++)
     {
-      struct ovl_node *n = d->tbl[s];
-      do_forget (NODE_TO_INODE (n), 1);
+      d->tbl[s]->node_lookups--;
+      if (d->tbl[s]->ino)
+        d->tbl[s]->ino->lookups--;
+      else
+        {
+          if (d->tbl[s]->node_lookups == 0)
+            node_free (d->tbl[s]);
+        }
     }
 
   free (d->tbl);
@@ -2146,7 +2340,7 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
     fprintf (stderr, "ovl_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
-  if (mask & n->mode == mask)
+  if (mask & n->ino->mode == mask)
     fuse_reply_err (req, 0);
   else
     fuse_reply_err (req, EPERM);
@@ -2703,8 +2897,6 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 
   if (node->layer == get_upper_layer (lo))
     {
-      node->hidden_dirfd = node->layer->fd;
-
       if (! dirp)
         node->do_unlink = 1;
       else
@@ -2736,7 +2928,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
       return;
     }
 
-  /* If the node is still accessible then be sure we,
+  /* If the node is still accessible then be sure we
      can write to it.  Fix it to be done when a write is
      really done, not now.  */
   node = get_node_up (lo, node);
@@ -3038,7 +3230,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (fstat (fd, st) < 0)
         return -1;
 
-      n = make_ovl_node (path, get_upper_layer (lo), name, st->st_ino, false, p, lo->fast_ino_check);
+      n = make_ovl_node (lo, path, get_upper_layer (lo), name, st->st_ino, false, p, lo->fast_ino_check);
       if (n == NULL)
         {
           errno = ENOMEM;
@@ -3140,7 +3332,7 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node, i
   if (err < 0)
     return err;
 
-  e->ino = (fuse_ino_t) node;
+  e->ino = node_to_inode (node);
   e->attr_timeout = get_timeout (lo);
   e->entry_timeout = get_timeout (lo);
 
@@ -3180,7 +3372,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   fi->fh = fd;
   fd = -1;  /* Do not clean it up.  */
 
-  node->lookups++;
+  node->ino->lookups++;
   fuse_reply_create (req, &e, fi);
 }
 
@@ -3275,7 +3467,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     fd = fi->fh;  // use existing fd if fuse_file_info is available
   else
     {
-      mode_t mode = node->mode;
+      mode_t mode = node->ino->mode;
       int dirfd = node_dirfd (node);
 
       if (mode == 0)
@@ -3288,7 +3480,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
               fuse_reply_err (req, errno);
               return;
             }
-          node->mode = mode = st.st_mode;
+          node->ino->mode = mode = st.st_mode;
         }
 
       switch (mode & S_IFMT)
@@ -3477,7 +3669,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       return;
     }
 
-  if (linkat (node_dirfd (newparentnode), node->path, lo->workdir_fd, wd_tmp_file_name, 0) < 0)
+  if (linkat (node_dirfd (node), node->path, lo->workdir_fd, wd_tmp_file_name, 0) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -3488,34 +3680,8 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       fuse_reply_err (req, errno);
       return;
     }
-  else
-    {
-      cleanup_close int dfd = TEMP_FAILURE_RETRY (openat (node_dirfd (newparentnode), path, O_WRONLY|O_NONBLOCK));
-      if (dfd >= 0)
-        {
-          bool set = false;
-          cleanup_close int sfd = TEMP_FAILURE_RETRY (openat (node_dirfd (node), node->path, O_RDONLY|O_NONBLOCK));
-          if (sfd >= 0)
-            {
-              cleanup_free char *origin_path = NULL;
-              ssize_t s;
 
-              s = safe_read_xattr (&origin_path, sfd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX + 1);
-              if (s > 0)
-                fsetxattr (dfd, PRIVILEGED_ORIGIN_XATTR, origin_path, s, 0);
-              else
-                {
-                  s = safe_read_xattr (&origin_path, sfd, ORIGIN_XATTR, PATH_MAX + 1);
-                  if (s > 0)
-                    fsetxattr (dfd, PRIVILEGED_ORIGIN_XATTR, origin_path, s, 0);
-                  else
-                    fsetxattr (dfd, ORIGIN_XATTR, node->path, strlen (node->path), 0);
-                }
-            }
-        }
-    }
-
-  node = make_ovl_node (path, get_upper_layer (lo), newname, node->ino, false, newparentnode, lo->fast_ino_check);
+  node = make_ovl_node (lo, path, get_upper_layer (lo), newname, node->tmp_ino, false, newparentnode, lo->fast_ino_check);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -3538,8 +3704,8 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       return;
     }
 
-  e.ino = NODE_TO_INODE (node);
-  node->lookups++;
+  e.ino = node_to_inode (node);
+  node->ino->lookups++;
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
@@ -3630,7 +3796,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false, pnode, lo->fast_ino_check);
+  node = make_ovl_node (lo, path, get_upper_layer (lo), name, 0, false, pnode, lo->fast_ino_check);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -3653,8 +3819,8 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
       return;
     }
 
-  e.ino = NODE_TO_INODE (node);
-  node->lookups++;
+  e.ino = node_to_inode (node);
+  node->ino->lookups++;
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
@@ -3861,7 +4027,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
     {
       size_t destnode_whiteouts = 0;
 
-      if (!destnode->whiteout && destnode->ino == node->ino)
+      if (!destnode->whiteout && destnode->tmp_ino == node->tmp_ino)
         goto error;
 
       destnode_is_whiteout = destnode->whiteout;
@@ -3884,7 +4050,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       if (node_dirp (node) && create_missing_whiteouts (lo, node, destnode->path) < 0)
         goto error;
 
-      if (destnode->lookups > 0)
+      if (destnode->ino->lookups > 0)
         node_free (destnode);
       else
         {
@@ -4173,7 +4339,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, 0, false, pnode, lo->fast_ino_check);
+  node = make_ovl_node (lo, path, get_upper_layer (lo), name, 0, false, pnode, lo->fast_ino_check);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -4202,10 +4368,10 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
 
-  e.ino = NODE_TO_INODE (node);
+  e.ino = node_to_inode (node);
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
-  node->lookups++;
+  node->ino->lookups++;
   fuse_reply_entry (req, &e);
 }
 
@@ -4275,7 +4441,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   if (parent_upperdir_only)
     ino = st.st_ino;
 
-  node = make_ovl_node (path, get_upper_layer (lo), name, ino, true, pnode, lo->fast_ino_check);
+  node = make_ovl_node (lo, path, get_upper_layer (lo), name, ino, true, pnode, lo->fast_ino_check);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOMEM);
@@ -4321,10 +4487,10 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  e.ino = NODE_TO_INODE (node);
+  e.ino = node_to_inode (node);
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
-  node->lookups++;
+  node->ino->lookups++;
   fuse_reply_entry (req, &e);
 }
 
@@ -4830,10 +4996,12 @@ main (int argc, char *argv[])
     error (EXIT_FAILURE, errno, "cannot read upper dir");
   lo.layers = layers = tmp_layer;
 
+  lo.inodes = hash_initialize (2048, NULL, node_inode_hasher, node_inode_compare, inode_free);
+
   lo.root = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
   if (lo.root == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
-  lo.root->lookups = 2;
+  lo.root->ino->lookups = 2;
 
   if (lo.workdir == NULL)
     error (EXIT_FAILURE, 0, "workdir not specified");
@@ -4895,7 +5063,7 @@ err_out1:
 
   node_mark_all_free (lo.root);
 
-  node_free (lo.root);
+  hash_free (lo.inodes);
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);
