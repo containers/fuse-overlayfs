@@ -47,6 +47,8 @@ docker run --rm -ti -v $(pwd)/merged:/merged centos:6 yum --installroot /merged 
 
 mkdir merged/a-directory
 
+python -c 'import socket; socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM).bind("merged/unix-socket")'
+
 setfattr -n user.foo -v bar merged/a-directory
 getfattr -d merged/a-directory | grep bar
 getfattr --only-values -n user.foo merged/a-directory | grep bar
