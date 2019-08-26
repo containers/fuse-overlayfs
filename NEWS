@@ -1,3 +1,7 @@
+* fuse-overlayfs-0.6.1
+
+- fix a regression introduced with 0.6 where UNIX sockets could not be correctly created.
+
 * fuse-overlayfs-0.6
 
 - fix an issue where changes to an inode would not be visible from another hard link.

@@ -1348,8 +1348,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
           cleanup_close int fd = TEMP_FAILURE_RETRY (openat (it->fd, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW));
           if (fd < 0)
             {
-              /* It is a symlink, read only the ino.  */
-              if (errno == ELOOP && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
+              if (errno != EPERM && fstatat (it->fd, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
                 {
                   ret->tmp_ino = st.st_ino;
                   mode = st.st_mode;
