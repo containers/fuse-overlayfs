@@ -338,29 +338,19 @@ get_next_wd_counter ()
 static ino_t
 node_to_inode (struct ovl_node *n)
 {
-  return n->tmp_ino;
+  return (ino_t) n->ino;
 }
 
 static struct ovl_ino *
 lookup_inode (struct ovl_data *lo, ino_t n)
 {
-  struct ovl_ino *ret;
-  struct ovl_ino key;
-  key.ino = n;
-
-  return hash_lookup (lo->inodes, &key);
+  return (struct ovl_ino *) n;
 }
 
 static struct ovl_node *
 inode_to_node (struct ovl_data *lo, ino_t n)
 {
-  struct ovl_ino *ret;
-
-  ret = lookup_inode (lo, n);
-  if (ret == NULL)
-    return NULL;
-
-  return ret->node;
+  return lookup_inode (lo, n)->node;
 }
 
 static int
@@ -937,15 +927,10 @@ static void
 drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 {
   struct ovl_ino *ino;
-  struct ovl_ino key;
   struct ovl_node *it, *prev = NULL;
   size_t len = 0;
 
-  key.ino = node->tmp_ino;
-
-  ino = hash_lookup (inodes, &key);
-  if (ino == NULL)
-    return;
+  ino = node->ino;
 
   for (it = ino->node; it; it = it->next_link)
     len++;
