@@ -1,3 +1,9 @@
+* fuse-overlayfs-0.6.2
+
+- avoid ino lookup if not necessary.
+- include st_dev in the hash key.  Now the same inode number can be safely used by lower
+  directories on different file systems.
+
 * fuse-overlayfs-0.6.1
 
 - fix a regression introduced with 0.6 where UNIX sockets could not be correctly created.
