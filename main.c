@@ -3463,7 +3463,7 @@ ovl_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   struct fuse_entry_param e;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_getattr(ino=%" PRIu64 "s)\n", ino);
+    fprintf (stderr, "ovl_getattr(ino=%" PRIu64 ")\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
