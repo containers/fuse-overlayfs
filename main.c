@@ -4873,13 +4873,13 @@ set_limits ()
   struct rlimit l;
 
   if (getrlimit (RLIMIT_NOFILE, &l) < 0)
-    error (EXIT_FAILURE, errno, "cannot read process rlimit");
+    error (EXIT_FAILURE, errno, "cannot read nofile rlimit");
 
   /* Set the soft limit to the hard limit.  */
   l.rlim_cur = l.rlim_max;
 
   if (setrlimit (RLIMIT_NOFILE, &l) < 0)
-    error (EXIT_FAILURE, errno, "cannot set process rlimit");
+    error (EXIT_FAILURE, errno, "cannot set nofile rlimit");
 }
 
 int
