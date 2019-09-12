@@ -81,6 +81,8 @@
 
 #include <pthread.h>
 
+#include <plugin.h>
+
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
   (__extension__                                                              \
@@ -211,6 +213,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, writeback), 1},
   {"noxattrs=%d",
    offsetof (struct ovl_data, disable_xattrs), 1},
+  {"plugins=%s",
+   offsetof (struct ovl_data, plugins), 0},
   FUSE_OPT_END
 };
 
@@ -1540,21 +1544,80 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
 
   for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
     {
+      char *name, *data;
+      char *it_path = it;
       cleanup_layer struct ovl_layer *l = NULL;
 
       l = calloc (1, sizeof (*l));
       if (l == NULL)
         return NULL;
 
-      l->ds = &direct_access_ds;
+      if (it[0] != '/' || it[1] != '/')
+        {
+          /* By default use the direct access data store.  */
+          l->ds = &direct_access_ds;
+
+          data = NULL;
+          path = it_path;
+        }
+      else
+        {
+          struct ovl_plugin *p;
+          char *plugin_data_sep, *plugin_sep;
+
+          if (! low)
+            {
+              fprintf (stderr, "plugins are supported only with lower layers\n");
+              return NULL;
+            }
+
+          plugin_sep = strchr (it + 2, '/');
+          if (! plugin_sep)
+            {
+              fprintf (stderr, "invalid separator for plugin\n");
+              return NULL;
+            }
+
+          *plugin_sep = '\0';
+
+          name = it + 2;
+          data = plugin_sep + 1;
+
+          plugin_data_sep = strchr (data, '/');
+          if (! plugin_data_sep)
+            {
+              fprintf (stderr, "invalid separator for plugin\n");
+              return NULL;
+            }
+
+          *plugin_data_sep = '\0';
+          path = plugin_data_sep + 1;
+
+          p = plugin_find (lo->plugins_ctx, name);
+          if (! p)
+            {
+              fprintf (stderr, "cannot find plugin %s\n", name);
+              return NULL;
+            }
+
+          l->ds = p->load (l, data, path);
+          if (l->ds == NULL)
+            {
+              fprintf (stderr, "cannot load plugin %s\n", name);
+              return NULL;
+            }
+        }
 
       l->ovl_data = lo;
 
       l->path = NULL;
       l->fd = -1;
 
-      if (l->ds->load_data_source (l, it) < 0)
-        return NULL;
+      if (l->ds->load_data_source (l, data, path) < 0)
+        {
+          fprintf (stderr, "cannot load store %s at %s\n", data, path);
+          return NULL;
+        }
 
       l->low = low;
       if (low)
@@ -4950,6 +5013,7 @@ main (int argc, char *argv[])
       fprintf (stderr, "workdir=%s\n", lo.workdir ? lo.workdir : "NOT USED");
       fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
       fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
+      fprintf (stderr, "plugins=%s\n", lo.plugins ? lo.plugins : "<none>");
     }
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
@@ -4962,6 +5026,9 @@ main (int argc, char *argv[])
       if (errno == ERANGE)
         error (EXIT_FAILURE, errno, "cannot convert %s", lo.timeout_str);
     }
+
+  if (lo.plugins)
+    lo.plugins_ctx = load_plugins (lo.plugins);
 
   layers = read_dirs (&lo, lo.lowerdir, true, NULL);
   if (layers == NULL)
@@ -5050,6 +5117,9 @@ err_out1:
   node_mark_all_free (lo.root);
 
   hash_free (lo.inodes);
+
+  if (lo.plugins)
+    plugin_free_all (lo.plugins_ctx);
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);

@@ -130,13 +130,16 @@ direct_readlinkat (struct ovl_layer *l, const char *path, char *buf, size_t bufs
 }
 
 static int
-direct_load_data_source (struct ovl_layer *l, const char *opaque)
+direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *path)
 {
-  l->path = realpath (opaque, NULL);
+  l->path = realpath (path, NULL);
   if (l->path == NULL)
-    return -1;
+    {
+      fprintf (stderr, "cannot resolve path %s\n", path);
+      return -1;
+    }
 
-  l->fd = open (l->path, O_DIRECTORY);
+  l->fd = open (path, O_DIRECTORY);
   if (l->fd < 0)
     {
       free (l->path);

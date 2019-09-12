@@ -18,8 +18,12 @@
 #ifndef FUSE_OVERLAYFS_H
 # define FUSE_OVERLAYFS_H
 
-# include <hash.h>
 # include <sys/stat.h>
+# include <plugin-manager.h>
+# include <stdbool.h>
+# include <sys/types.h>
+
+typedef struct hash_table Hash_table;
 
 struct ovl_ino
 {
@@ -76,6 +80,7 @@ struct ovl_data
   char *upperdir;
   char *workdir;
   char *redirect_dir;
+  char *plugins;
   int workdir_fd;
   int debug;
   struct ovl_layer *layers;
@@ -94,6 +99,8 @@ struct ovl_data
   /* current uid/gid*/
   uid_t uid;
   uid_t gid;
+
+  struct ovl_plugin_context *plugins_ctx;
 };
 
 struct ovl_layer
@@ -104,12 +111,14 @@ struct ovl_layer
   char *path;
   int fd;
   bool low;
+
+  void *data_source_private_data;
 };
 
 /* a data_source defines the methods for accessing a lower layer.  */
 struct data_source
 {
-  int (*load_data_source)(struct ovl_layer *l, const char *opaque);
+  int (*load_data_source)(struct ovl_layer *l, const char *opaque, const char *path);
   int (*cleanup)(struct ovl_layer *l);
   int (*file_exists)(struct ovl_layer *l, const char *pathname);
   int (*statat)(struct ovl_layer *l, const char *path, struct stat *st, int flags);
