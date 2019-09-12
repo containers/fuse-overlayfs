@@ -18,36 +18,22 @@
 #ifndef UTILS_H
 # define UTILS_H
 
-void
-cleanup_freep (void *p)
-{
-  void **pp = (void **) p;
-  free (*pp);
-}
+# include <unistd.h>
+# include <stdio.h>
+# include <sys/types.h>
+# include <dirent.h>
+# include <stdlib.h>
+# include "fuse-overlayfs.h"
 
-void
-cleanup_filep (FILE **f)
-{
-  FILE *file = *f;
-  if (file)
-    (void) fclose (file);
-}
+void cleanup_freep (void *p);
+void cleanup_filep (FILE **f);
+void cleanup_closep (void *p);
+void cleanup_dirp (DIR **p);
 
-void
-cleanup_closep (void *p)
-{
-  int *pp = p;
-  if (*pp >= 0)
-    close (*pp);
-}
+int file_exists_at (int dirfd, const char *pathname);
 
-void
-cleanup_dirp (DIR **p)
-{
-  DIR *dir = *p;
-  if (dir)
-    closedir (dir);
-}
+int strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3);
+int open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, int flags);
 
 # define cleanup_file __attribute__((cleanup (cleanup_filep)))
 # define cleanup_free __attribute__((cleanup (cleanup_freep)))

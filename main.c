@@ -141,12 +141,6 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 }
 #endif
 
-static int
-file_exists_at (int dirfd, const char *pathname)
-{
-  return faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
-}
-
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
 # define RENAME_NOREPLACE (1 << 2)
@@ -272,52 +266,6 @@ static struct ovl_node *
 inode_to_node (struct ovl_data *lo, ino_t n)
 {
   return lookup_inode (lo, n)->node;
-}
-
-static int
-strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3)
-{
-  size_t t;
-  char *current = dest;
-
-  size--;
-
-  if (s1)
-    {
-      t = strlen (s1);
-      if (t > size)
-        t = size;
-
-      memcpy (current, s1, t);
-      current += t;
-
-      size -= t;
-    }
-  if (s2)
-    {
-      t = strlen (s2);
-      if (t > size)
-        t = size;
-
-      memcpy (current, s2, t);
-      current += t;
-
-      size -= t;
-    }
-  if (s3)
-    {
-      t = strlen (s3);
-      if (t > size)
-        t = size;
-
-      memcpy (current, s3, t);
-      current += t;
-
-      size -= t;
-    }
-  *current = '\0';
-
-  return current - dest;
 }
 
 static void
@@ -1602,14 +1550,10 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
 
       l->ovl_data = lo;
 
+      l->path = NULL;
       l->fd = -1;
 
-      l->path = realpath (it, NULL);
-      if (l->path == NULL)
-        return NULL;
-
-      l->fd = open (l->path, O_DIRECTORY);
-      if (l->fd < 0)
+      if (l->ds->load_data_source (l, it) < 0)
         return NULL;
 
       l->low = low;
@@ -2910,23 +2854,6 @@ ovl_rmdir (fuse_req_t req, fuse_ino_t parent, const char *name)
     fprintf (stderr, "ovl_rmdir(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
   do_rm (req, parent, name, true);
-}
-
-static int
-open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, int flags)
-{
-  int ret;
-
-  out[0] = '\0';
-
-  *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0755);
-  if (*fd < 0 && (errno == ELOOP || errno == EISDIR))
-    {
-      strconcat3 (out, PATH_MAX, l->path, "/", path);
-      return 0;
-    }
-
-  return *fd;
 }
 
 static int
@@ -4789,117 +4716,6 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
 }
 #endif
 
-static int
-direct_file_exists (struct ovl_layer *l, const char *pathname)
-{
-  return file_exists_at (l->fd, pathname);
-}
-
-static int
-direct_listxattr (struct ovl_layer *l, const char *path, char *buf, size_t size)
-{
-  cleanup_close int fd = -1;
-  char full_path[PATH_MAX];
-  int ret;
-
-  full_path[0] = '\0';
-  ret = open_fd_or_get_path (l, path, full_path, &fd, O_RDONLY);
-  if (ret < 0)
-    return ret;
-
-  if (fd >= 0)
-    return flistxattr (fd, buf, size);
-
-  return llistxattr (full_path, buf, size);
-}
-
-static int
-direct_getxattr (struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size)
-{
-  cleanup_close int fd = -1;
-  char full_path[PATH_MAX];
-  int ret;
-
-  full_path[0] = '\0';
-  ret = open_fd_or_get_path (l, path, full_path, &fd, O_RDONLY);
-  if (ret < 0)
-    return ret;
-
-  if (fd >= 0)
-    return fgetxattr (fd, name, buf, size);
-
-  return lgetxattr (full_path, name, buf, size);
-}
-
-static int
-direct_fstat (struct ovl_layer *l, int fd, const char *path, struct stat *st)
-{
-  return fstat (fd, st);
-}
-
-static int
-direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags)
-{
-  return TEMP_FAILURE_RETRY (fstatat (l->fd, path, st, flags));
-}
-
-static struct dirent *
-direct_readdir (void *dirp)
-{
-  return readdir (dirp);
-}
-
-static void *
-direct_opendir (struct ovl_layer *l, const char *path)
-{
-  cleanup_close int cleanup_fd = -1;
-  DIR *dp = NULL;
-
-  cleanup_fd = TEMP_FAILURE_RETRY (openat (l->fd, path, O_DIRECTORY));
-  if (cleanup_fd < 0)
-    return NULL;
-
-  dp = fdopendir (cleanup_fd);
-  if (dp == NULL)
-    return NULL;
-
-  cleanup_fd = -1;
-
-  return dp;
-}
-
-static int
-direct_closedir (void *dirp)
-{
-  return closedir (dirp);
-}
-
-static int
-direct_openat (struct ovl_layer *l, const char *path, int flags, mode_t mode)
-{
-  return TEMP_FAILURE_RETRY (openat (l->fd, path, flags, mode));
-}
-
-static ssize_t
-direct_readlinkat (struct ovl_layer *l, const char *path, char *buf, size_t bufsiz)
-{
-  return TEMP_FAILURE_RETRY (readlinkat (l->fd, path, buf, bufsiz));
-}
-
-struct data_source direct_access_ds =
-  {
-   .file_exists = direct_file_exists,
-   .statat = direct_statat,
-   .fstat = direct_fstat,
-   .opendir = direct_opendir,
-   .readdir = direct_readdir,
-   .closedir = direct_closedir,
-   .openat = direct_openat,
-   .getxattr = direct_getxattr,
-   .listxattr = direct_listxattr,
-   .readlinkat = direct_readlinkat,
-  };
-
 static struct fuse_lowlevel_ops ovl_oper =
   {
    .statfs = ovl_statfs,
@@ -5227,6 +5043,9 @@ err_out3:
 err_out2:
   fuse_session_destroy (se);
 err_out1:
+
+  for (tmp_layer = lo.layers; tmp_layer; tmp_layer = tmp_layer->next)
+    tmp_layer->ds->cleanup (tmp_layer);
 
   node_mark_all_free (lo.root);
 
