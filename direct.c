@@ -75,15 +75,45 @@ direct_getxattr (struct ovl_layer *l, const char *path, const char *name, char *
 }
 
 static int
-direct_fstat (struct ovl_layer *l, int fd, const char *path, struct stat *st)
+direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, struct stat *st)
 {
+#ifdef HAVE_STATX
+  int ret;
+  struct statx stx;
+
+  ret = statx (fd, "", AT_STATX_DONT_SYNC|AT_EMPTY_PATH, mask, &stx);
+
+  if (ret < 0 && errno == ENOSYS)
+    goto fallback;
+  if (ret == 0)
+    statx_to_stat (&stx, st);
+
+  return ret;
+#endif
+
+ fallback:
   return fstat (fd, st);
+
 }
 
 static int
-direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags)
+direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags, unsigned int mask)
 {
-  return TEMP_FAILURE_RETRY (fstatat (l->fd, path, st, flags));
+#ifdef HAVE_STATX
+  int ret;
+  struct statx stx;
+
+  ret = statx (l->fd, path, AT_STATX_DONT_SYNC|flags, mask, &stx);
+
+  if (ret < 0 && errno == ENOSYS)
+    goto fallback;
+  if (ret == 0)
+    statx_to_stat (&stx, st);
+
+  return ret;
+#endif
+ fallback:
+  return fstatat (l->fd, path, st, flags);
 }
 
 static struct dirent *

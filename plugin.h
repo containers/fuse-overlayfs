@@ -20,8 +20,8 @@
 # define PLUGIN_H
 # include <config.h>
 
-# include <fuse-overlayfs.h>
 # include <utils.h>
+# include <fuse-overlayfs.h>
 
 typedef struct data_source *(*plugin_load_data_source)(struct ovl_layer *layer, const char *opaque, const char *path);
 typedef int (*plugin_release)(struct ovl_layer *layer);

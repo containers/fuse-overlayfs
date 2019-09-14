@@ -598,7 +598,7 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
 
           strconcat3 (whiteout_path, PATH_MAX, parent->path, "/", name);
 
-          if (get_upper_layer (lo)->ds->statat (get_upper_layer (lo), whiteout_path, &st, AT_SYMLINK_NOFOLLOW) == 0
+          if (get_upper_layer (lo)->ds->statat (get_upper_layer (lo), whiteout_path, &st, AT_SYMLINK_NOFOLLOW, STATX_MODE|STATX_TYPE) == 0
               && (st.st_mode & S_IFMT) == S_IFCHR
               && major (st.st_rdev) == 0
               && minor (st.st_rdev) == 0)
@@ -676,13 +676,13 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
   if (st_in)
     memcpy (st, st_in, sizeof (* st));
   else if (fd >= 0)
-    ret = l->ds->fstat (l, fd, path, st);
+    ret = l->ds->fstat (l, fd, path, STATX_BASIC_STATS, st);
   else if (path != NULL)
     ret = stat (path, st);
   else if (node->hidden)
     ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
     else
-      ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW);
+      ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
 
   if (ret < 0)
     return ret;
@@ -1204,7 +1204,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
 
           if (fd < 0)
             {
-              if (errno != EPERM && it->ds->statat (it, npath, &st, AT_SYMLINK_NOFOLLOW) == 0)
+              if (errno != EPERM && it->ds->statat (it, npath, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_MODE|STATX_INO) == 0)
                 {
                   ret->tmp_ino = st.st_ino;
                   ret->tmp_dev = st.st_dev;
@@ -1215,7 +1215,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
             }
 
           /* It is an open FD, stat the file and read the origin xattrs.  */
-          if (it->ds->fstat (it, fd, npath, &st) == 0)
+          if (it->ds->fstat (it, fd, npath, STATX_TYPE|STATX_MODE|STATX_INO, &st) == 0)
             {
               ret->tmp_ino = st.st_ino;
               ret->tmp_dev = st.st_dev;
@@ -1250,7 +1250,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
                   originfd = open_by_handle_at (AT_FDCWD, fh, O_RDONLY);
                   if (originfd >= 0)
                     {
-                      if (it->ds->fstat (it, originfd, npath, &st) == 0)
+                      if (it->ds->fstat (it, originfd, npath, STATX_TYPE|STATX_MODE|STATX_INO, &st) == 0)
                         {
                           ret->tmp_ino = st.st_ino;
                           ret->tmp_dev = st.st_dev;
@@ -1444,7 +1444,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                      a whiteout file.  */
                   struct stat st;
 
-                  ret = it->ds->statat (it, node_path, &st, AT_SYMLINK_NOFOLLOW);
+                  ret = it->ds->statat (it, node_path, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE);
                   if (ret < 0)
                     {
                       it->ds->closedir (dp);
@@ -1678,7 +1678,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
           strconcat3 (path, PATH_MAX, pnode->path, "/", name);
 
-          ret = it->ds->statat (it, path, &st, AT_SYMLINK_NOFOLLOW);
+          ret = it->ds->statat (it, path, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_MODE|STATX_INO);
           if (ret < 0)
             {
               int saved_errno = errno;
@@ -2493,7 +2493,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  ret = node->layer->ds->statat (node->layer, node->path, &st, AT_SYMLINK_NOFOLLOW);
+  ret = node->layer->ds->statat (node->layer, node->path, &st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
   if (ret < 0)
     return ret;
 
@@ -3197,7 +3197,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (st == NULL)
         st = &st_tmp;
 
-      if (get_upper_layer (lo)->ds->fstat (get_upper_layer (lo), fd, path, st) < 0)
+      if (get_upper_layer (lo)->ds->fstat (get_upper_layer (lo), fd, path, STATX_BASIC_STATS, st) < 0)
         return -1;
 
       n = make_ovl_node (lo, path, get_upper_layer (lo), name, st->st_ino, st->st_dev, false, p, lo->fast_ino_check);

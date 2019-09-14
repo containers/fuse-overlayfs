@@ -17,17 +17,44 @@
 */
 
 #include <config.h>
+#include "utils.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
-#include "utils.h"
+#include <sys/sysmacros.h>
 
 int
 file_exists_at (int dirfd, const char *pathname)
 {
   return faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
-
 }
+
+#ifdef HAVE_STATX
+void
+copy_statx_to_stat_time (struct statx_timestamp *stx, struct timespec *st)
+{
+  st->tv_sec = stx->tv_sec;
+  st->tv_nsec = stx->tv_nsec;
+}
+
+void
+statx_to_stat (struct statx *stx, struct stat *st)
+{
+  st->st_dev = makedev (stx->stx_dev_major, stx->stx_dev_minor);
+  st->st_ino = stx->stx_ino;
+  st->st_mode = stx->stx_mode;
+  st->st_nlink = stx->stx_nlink;
+  st->st_uid = stx->stx_uid;
+  st->st_gid = stx->stx_gid;
+  st->st_rdev = makedev (stx->stx_rdev_major, stx->stx_rdev_minor);
+  st->st_size = stx->stx_size;
+  st->st_blksize = stx->stx_blksize;
+  st->st_blocks = stx->stx_blocks;
+  copy_statx_to_stat_time (&stx->stx_atime, &st->st_atim);
+  copy_statx_to_stat_time (&stx->stx_ctime, &st->st_ctim);
+  copy_statx_to_stat_time (&stx->stx_mtime, &st->st_mtim);
+}
+#endif
 
 int
 strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3)

@@ -18,11 +18,17 @@
 #ifndef UTILS_H
 # define UTILS_H
 
+# define _GNU_SOURCE
+
+# include <config.h>
+
 # include <unistd.h>
 # include <stdio.h>
 # include <sys/types.h>
 # include <dirent.h>
 # include <stdlib.h>
+# include <sys/types.h>
+# include <fcntl.h>
 # include "fuse-overlayfs.h"
 
 void cleanup_freep (void *p);
@@ -42,5 +48,9 @@ int open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *
 
 # define LIKELY(x) __builtin_expect((x),1)
 # define UNLIKELY(x) __builtin_expect((x),0)
+
+# ifdef HAVE_STATX
+void statx_to_stat (struct statx *stx, struct stat *st);
+# endif
 
 #endif
