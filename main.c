@@ -4600,7 +4600,8 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
     {
     case FS_IOC_GETVERSION:
     case FS_IOC_GETFLAGS:
-      fd = fi->fh;
+      if (! node_dirp (node))
+        fd = fi->fh;
       break;
 
     case FS_IOC_SETVERSION:
