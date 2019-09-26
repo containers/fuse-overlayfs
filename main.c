@@ -1835,11 +1835,6 @@ insert_node:
         }
     }
 
-  if (node == NULL || node->whiteout)
-    {
-      errno = ENOENT;
-      return NULL;
-    }
   return node;
 }
 
@@ -1859,7 +1854,7 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   memset (&e, 0, sizeof (e));
 
   node = do_lookup_file (lo, parent, name);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       e.ino = 0;
       e.attr_timeout = get_timeout (lo);
@@ -3146,6 +3141,8 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   const struct fuse_ctx *ctx = fuse_req_ctx (req);
   uid_t uid;
   gid_t gid;
+  bool need_delete_whiteout = true;
+  bool is_whiteout = false;
 
   flags |= O_NOFOLLOW;
 
@@ -3176,6 +3173,11 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       errno = EEXIST;
       return -1;
     }
+  if (n && n->whiteout)
+    {
+      n = NULL;
+      is_whiteout = true;
+    }
 
   if (!n)
     {
@@ -3183,7 +3185,6 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       struct ovl_node *p;
       const struct fuse_ctx *ctx = fuse_req_ctx (req);
       char wd_tmp_file_name[32];
-      bool need_delete_whiteout = true;
       struct stat st_tmp;
 
       if ((flags & O_CREAT) == 0)
@@ -3203,7 +3204,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       if (p == NULL)
         return -1;
 
-      if (p->loaded && n == NULL)
+      if (p->loaded && !is_whiteout)
         need_delete_whiteout = false;
 
       sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
@@ -4600,7 +4601,8 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
     {
     case FS_IOC_GETVERSION:
     case FS_IOC_GETFLAGS:
-      fd = fi->fh;
+      if (! node_dirp (node))
+        fd = fi->fh;
       break;
 
     case FS_IOC_SETVERSION:

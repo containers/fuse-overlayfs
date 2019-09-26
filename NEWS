@@ -1,3 +1,8 @@
+* fuse-overlayfs-0.6.3
+
+- correctly delete an existing whiteout when the file is recreated (regression introduced with 0.5).
+- fix ioctl on directories.
+
 * fuse-overlayfs-0.6.2
 
 - avoid ino lookup if not necessary.
