@@ -1208,7 +1208,8 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
                 {
                   ret->tmp_ino = st.st_ino;
                   ret->tmp_dev = st.st_dev;
-                  mode = st.st_mode;
+                  if (mode == 0)
+                    mode = st.st_mode;
                   ret->last_layer = it;
                 }
                 goto no_fd;
@@ -1219,7 +1220,8 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
             {
               ret->tmp_ino = st.st_ino;
               ret->tmp_dev = st.st_dev;
-              mode = st.st_mode;
+              if (mode == 0)
+                mode = st.st_mode;
               ret->last_layer = it;
             }
 
