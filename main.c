@@ -979,8 +979,7 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
       bool whiteout_created = false;
       bool needs_whiteout;
 
-      needs_whiteout = node->parent && node->parent->last_layer != get_upper_layer (lo);
-
+      needs_whiteout = (node->last_layer != get_upper_layer (lo)) && (node->parent && node->parent->last_layer != get_upper_layer (lo));
       if (needs_whiteout)
         {
           /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
@@ -3235,6 +3234,9 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
           errno = ENOMEM;
           return -1;
         }
+      if (!is_whiteout)
+        n->last_layer = get_upper_layer (lo);
+
       n = insert_node (p, n, true);
       if (n == NULL)
         {
@@ -3703,6 +3705,8 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
       fuse_reply_err (req, ENOMEM);
       return;
     }
+  if (destnode && !destnode->whiteout)
+    node->last_layer = get_upper_layer (lo);
 
   node = insert_node (newparentnode, node, true);
   if (node == NULL)
