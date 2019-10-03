@@ -15,7 +15,14 @@ rm -rf workdir lower
 mv upper lower
 mkdir upper workdir
 
+gcc -static -o suid-test $(dirname $0)/suid-test.c
+
 fuse-overlayfs -o sync=0,threaded=1,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
+SUID_TEST=$(pwd)/suid-test
+(cd merged; $SUID_TEST)
+
+stat -c %A upper/suid | grep s
+stat -c %a upper/nosuid | grep -v s
 
 # Install some big packages
 docker run --rm -ti -v $(pwd)/merged:/merged fedora dnf --installroot /merged --releasever 30 install -y emacs texlive

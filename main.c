@@ -3287,8 +3287,10 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
 	      struct fuse_bufvec *in_buf, off_t off,
 	      struct fuse_file_info *fi)
 {
-  (void) ino;
+  struct ovl_data *lo = ovl_data (req);
   ssize_t res;
+  struct ovl_ino *inode;
+  int saved_errno;
   struct fuse_bufvec out_buf = FUSE_BUFVEC_INIT (fuse_buf_size (in_buf));
   out_buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
   out_buf.buf[0].fd = fi->fh;
@@ -3298,10 +3300,24 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
     fprintf (stderr, "ovl_write_buf(ino=%" PRIu64 ", size=%zd, off=%lu, fd=%d)\n",
 	     ino, out_buf.buf[0].size, (unsigned long) off, (int) fi->fh);
 
+  inode = lookup_inode (lo, ino);
+
   errno = 0;
   res = fuse_buf_copy (&out_buf, in_buf, 0);
+  saved_errno = errno;
+
+  /* if it is a writepage request, make sure to restore the setuid bit.  */
+  if (fi->writepage && (inode->mode & (S_ISUID|S_ISGID)))
+    {
+      if (fchmod (fi->fh, inode->mode) < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+    }
+
   if (res < 0)
-    fuse_reply_err (req, errno);
+    fuse_reply_err (req, saved_errno);
   else
     fuse_reply_write (req, (size_t) res);
 }
