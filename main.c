@@ -3560,6 +3560,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
           fuse_reply_err (req, errno);
           return;
         }
+      node->ino->mode = attr->st_mode;
     }
 
   if (to_set & FUSE_SET_ATTR_SIZE)
