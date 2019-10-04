@@ -1,3 +1,8 @@
+* fuse-overlayfs-0.6.4
+
+- do not lose the setuid bit after a write when the writeback cache is used.
+- skip creating a whiteout if the node is present only on the upper layer.
+
 * fuse-overlayfs-0.6.3
 
 - correctly delete an existing whiteout when the file is recreated (regression introduced with 0.5).
