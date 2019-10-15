@@ -1862,6 +1862,16 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
+  if (node_dirp (node))
+    {
+      node = reload_dir (lo, node);
+      if (node == NULL)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+    }
+
   err = rpl_stat (req, node, -1, NULL, NULL, &e.attr);
   if (err)
     {
@@ -2108,6 +2118,16 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
           }
         else
           {
+            if (node_dirp (node))
+              {
+                node = reload_dir (lo, node);
+                if (node == NULL)
+                  {
+                    fuse_reply_err (req, errno);
+                    return;
+                  }
+              }
+
             memset (&e, 0, sizeof (e));
             ret = rpl_stat (req, node, -1, NULL, NULL, st);
             if (ret < 0)

@@ -1,3 +1,7 @@
+* fuse-overlayfs-0.6.5
+
+- stat reports correctly the number of links for a directory.
+
 * fuse-overlayfs-0.6.4
 
 - do not lose the setuid bit after a write when the writeback cache is used.
