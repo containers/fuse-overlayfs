@@ -21,6 +21,11 @@ fuse-overlayfs -o sync=0,threaded=1,lowerdir=lower,upperdir=upper,workdir=workdi
 SUID_TEST=$(pwd)/suid-test
 (cd merged; $SUID_TEST)
 
+# Test the number of hard links for populated directories is > 2
+test $(stat -c %h merged/etc) -gt 2
+ls merged/usr
+test $(stat -c %h merged/usr) -gt 2
+
 stat -c %A upper/suid | grep s
 stat -c %a upper/nosuid | grep -v s
 
