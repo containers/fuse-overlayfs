@@ -545,14 +545,26 @@ ovl_init (void *userdata, struct fuse_conn_info *conn)
 }
 
 static struct ovl_layer *
+get_first_layer (struct ovl_data *lo)
+{
+  return lo->layers;
+}
+
+static struct ovl_layer *
 get_upper_layer (struct ovl_data *lo)
 {
+  if (lo->upperdir == NULL)
+    return NULL;
+
   return lo->layers;
 }
 
 static struct ovl_layer *
 get_lower_layers (struct ovl_data *lo)
 {
+  if (lo->upperdir == NULL)
+    return lo->layers;
+
   return lo->layers->next;
 }
 
@@ -2719,6 +2731,12 @@ get_node_up (struct ovl_data *lo, struct ovl_node *node)
 {
   int ret;
 
+  if (lo->upperdir == NULL)
+    {
+      errno = EROFS;
+      return NULL;
+    }
+
   if (node->layer == get_upper_layer (lo))
     return node;
 
@@ -2936,7 +2954,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   pnode = get_node_up (lo, pnode);
   if (pnode == NULL)
     {
-      fuse_reply_err (req, ENOENT);
+      fuse_reply_err (req, errno);
       return;
     }
 
@@ -4204,14 +4222,19 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 static void
 ovl_statfs (fuse_req_t req, fuse_ino_t ino)
 {
-  int ret;
+  int ret, fd;
   struct statvfs sfs;
   struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_statfs(ino=%" PRIu64 "s)\n", ino);
 
-  ret = fstatvfs (get_upper_layer (lo)->fd, &sfs);
+  fd = get_first_layer (lo)->fd;
+
+  if (fd >= 0)
+    ret = fstatvfs (fd, &sfs);
+  else
+    ret = statvfs (lo->mountpoint, &sfs);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
@@ -4991,9 +5014,7 @@ main (int argc, char *argv[])
   if (lo.redirect_dir && strcmp (lo.redirect_dir, "off"))
     error (EXIT_FAILURE, 0, "fuse-overlayfs only supports redirect_dir=off");
 
-  if (lo.upperdir == NULL)
-    error (EXIT_FAILURE, 0, "upperdir not specified");
-  else
+  if (lo.upperdir != NULL)
     {
       cleanup_free char *full_path = NULL;
 
@@ -5013,8 +5034,8 @@ main (int argc, char *argv[])
     {
       fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
       fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
-      fprintf (stderr, "upperdir=%s\n", lo.upperdir);
-      fprintf (stderr, "workdir=%s\n", lo.workdir);
+      fprintf (stderr, "upperdir=%s\n", lo.upperdir ? lo.upperdir : "NOT USED");
+      fprintf (stderr, "workdir=%s\n", lo.workdir ? lo.workdir : "NOT USED");
       fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
       fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
     }
@@ -5036,21 +5057,26 @@ main (int argc, char *argv[])
       error (EXIT_FAILURE, errno, "cannot read lower dirs");
     }
 
-  tmp_layer = read_dirs (lo.upperdir, false, layers);
-  if (tmp_layer == NULL)
-    error (EXIT_FAILURE, errno, "cannot read upper dir");
-  lo.layers = layers = tmp_layer;
+  if (lo.upperdir != NULL)
+    {
+      tmp_layer = read_dirs (lo.upperdir, false, layers);
+      if (tmp_layer == NULL)
+        error (EXIT_FAILURE, errno, "cannot read upper dir");
+      layers = tmp_layer;
+    }
+  lo.layers = layers;
 
   lo.inodes = hash_initialize (2048, NULL, node_inode_hasher, node_inode_compare, inode_free);
 
-  lo.root = load_dir (&lo, NULL, get_upper_layer (&lo), ".", "");
+  lo.root = load_dir (&lo, NULL, lo.layers, ".", "");
   if (lo.root == NULL)
     error (EXIT_FAILURE, errno, "cannot read upper dir");
   lo.root->ino->lookups = 2;
 
-  if (lo.workdir == NULL)
+  if (lo.workdir == NULL && lo.upperdir != NULL)
     error (EXIT_FAILURE, 0, "workdir not specified");
-  else
+
+  if (lo.workdir)
     {
       int dfd;
       cleanup_free char *path = NULL;

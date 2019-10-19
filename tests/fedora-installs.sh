@@ -67,3 +67,19 @@ getfattr --only-values -n user.foo merged/a-directory | grep bar
 getfattr --only-values -n user.foo upper/a-directory | grep bar
 
 umount merged
+
+touch lower/file-lower-layer
+
+# no upper layer
+fuse-overlayfs -o lowerdir=lower merged
+
+tar -c --to-stdout $(pwd)/merged > /dev/null
+
+set +o pipefail
+
+touch merged/a 2>&1 | grep Read-only
+touch merged/file-lower-layer 2>&1 | grep Read-only
+touch merged/usr 2>&1 | grep Read-only
+mkdir merged/abcd12345 2>&1 | grep Read-only
+ln merged/file-lower-layer merged/file-lower-layer-link 2>&1 | grep Read-only
+ln -s merged/file-lower-layer merged/a-symlink 2>&1 | grep Read-only
