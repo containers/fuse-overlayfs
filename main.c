@@ -1200,11 +1200,12 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
 
-          fd = it->ds->openat (it, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW, 0755);
+          if (! fast_ino_check)
+            fd = it->ds->openat (it, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW, 0755);
 
           if (fd < 0)
             {
-              if (errno != EPERM && it->ds->statat (it, npath, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_MODE|STATX_INO) == 0)
+              if (it->ds->statat (it, npath, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_MODE|STATX_INO) == 0)
                 {
                   ret->tmp_ino = st.st_ino;
                   ret->tmp_dev = st.st_dev;
@@ -1274,8 +1275,6 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
 
 no_fd:
           if (parent && parent->last_layer == it)
-            break;
-          if (fast_ino_check)
             break;
         }
     }
@@ -1407,9 +1406,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                   node_free (child);
                   child = NULL;
                 }
-
-              if (lo->fast_ino_check)
-                continue;
             }
 
           strconcat3 (whiteout_path, PATH_MAX, ".wh.", dent->d_name, NULL);
@@ -1469,7 +1465,12 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
               else
                 {
-                  child = make_ovl_node (lo, node_path, it, dent->d_name, 0, 0, dirp, n, lo->fast_ino_check);
+                  ino_t ino = 0;
+
+                  if (lo->fast_ino_check)
+                    ino = dent->d_ino;
+
+                  child = make_ovl_node (lo, node_path, it, dent->d_name, ino, 0, dirp, n, lo->fast_ino_check);
                   if (child == NULL)
                     {
                       errno = ENOMEM;
@@ -1760,8 +1761,6 @@ insert_node:
             }
 
           if (pnode && pnode->last_layer == it)
-            break;
-          if (lo->fast_ino_check)
             break;
         }
     }
