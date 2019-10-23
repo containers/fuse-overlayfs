@@ -160,7 +160,7 @@ direct_readlinkat (struct ovl_layer *l, const char *path, char *buf, size_t bufs
 }
 
 static int
-direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *path)
+direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *path, int n_layer)
 {
   l->path = realpath (path, NULL);
   if (l->path == NULL)
@@ -186,8 +186,15 @@ direct_cleanup (struct ovl_layer *l)
   return 0;
 }
 
+static int
+direct_num_of_layers (const char *opaque, const char *path)
+{
+  return 1;
+}
+
 struct data_source direct_access_ds =
   {
+   .num_of_layers = direct_num_of_layers,
    .load_data_source = direct_load_data_source,
    .cleanup = direct_cleanup,
    .file_exists = direct_file_exists,

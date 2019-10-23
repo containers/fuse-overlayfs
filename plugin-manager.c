@@ -110,7 +110,10 @@ plugin_free_all (struct ovl_plugin_context *context)
     {
       next = it->next;
 
-      dlclose (it->handle);
+      it->release ();
+
+      /* Skip dlclose (it->handle) as it causes plugins written in Go to crash.  */
+
       free (it);
 
       it = next;

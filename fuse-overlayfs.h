@@ -119,7 +119,8 @@ struct ovl_layer
 /* a data_source defines the methods for accessing a lower layer.  */
 struct data_source
 {
-  int (*load_data_source)(struct ovl_layer *l, const char *opaque, const char *path);
+  int (*num_of_layers) (const char *opaque, const char *path);
+  int (*load_data_source)(struct ovl_layer *l, const char *opaque, const char *path, int n_layer);
   int (*cleanup)(struct ovl_layer *l);
   int (*file_exists)(struct ovl_layer *l, const char *pathname);
   int (*statat)(struct ovl_layer *l, const char *path, struct stat *st, int flags, unsigned int mask);

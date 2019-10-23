@@ -23,8 +23,8 @@
 # include <utils.h>
 # include <fuse-overlayfs.h>
 
-typedef struct data_source *(*plugin_load_data_source)(struct ovl_layer *layer, const char *opaque, const char *path);
-typedef int (*plugin_release)(struct ovl_layer *layer);
+typedef struct data_source *(*plugin_load_data_source)(const char *opaque, const char *path);
+typedef int (*plugin_release)();
 typedef const char *(*plugin_name)();
 typedef int (*plugin_version)();
 

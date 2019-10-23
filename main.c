@@ -1549,16 +1549,14 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
     {
       char *name, *data;
       char *it_path = it;
+      int i, n_layers;
       cleanup_layer struct ovl_layer *l = NULL;
-
-      l = calloc (1, sizeof (*l));
-      if (l == NULL)
-        return NULL;
+      struct data_source *ds;
 
       if (it[0] != '/' || it[1] != '/')
         {
           /* By default use the direct access data store.  */
-          l->ds = &direct_access_ds;
+          ds = &direct_access_ds;
 
           data = NULL;
           path = it_path;
@@ -1603,43 +1601,59 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
               return NULL;
             }
 
-          l->ds = p->load (l, data, path);
-          if (l->ds == NULL)
+          ds = p->load (data, path);
+          if (ds == NULL)
             {
               fprintf (stderr, "cannot load plugin %s\n", name);
               return NULL;
             }
         }
 
-      l->ovl_data = lo;
-
-      l->path = NULL;
-      l->fd = -1;
-
-      if (l->ds->load_data_source (l, data, path) < 0)
+      n_layers = ds->num_of_layers (data, path);
+      if (n_layers < 0)
         {
-          fprintf (stderr, "cannot load store %s at %s\n", data, path);
+          fprintf (stderr, "cannot retrieve number of layers for %s\n", path);
           return NULL;
         }
 
-      l->low = low;
-      if (low)
+      for (i = 0; i < n_layers; i++)
         {
-          l->next = NULL;
-          if (last == NULL)
-            last = layers = l;
+          l = calloc (1, sizeof (*l));
+          if (l == NULL)
+            return NULL;
+
+          l->ds = ds;
+
+          l->ovl_data = lo;
+
+          l->path = NULL;
+          l->fd = -1;
+
+          if (l->ds->load_data_source (l, data, path, i) < 0)
+            {
+              fprintf (stderr, "cannot load store %s at %s\n", data, path);
+              return NULL;
+            }
+
+          l->low = low;
+          if (low)
+            {
+              l->next = NULL;
+              if (last == NULL)
+                last = layers = l;
+              else
+                {
+                  last->next = l;
+                  last = l;
+                }
+            }
           else
             {
-              last->next = l;
-              last = l;
+              l->next = layers;
+              layers = l;
             }
+          l = NULL;
         }
-      else
-        {
-          l->next = layers;
-          layers = l;
-        }
-      l = NULL;
     }
   return layers;
 }
