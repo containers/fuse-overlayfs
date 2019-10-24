@@ -5143,5 +5143,6 @@ err_out1:
 
   fuse_opt_free_args (&args);
 
-  return ret ? 1 : 0;
+  exit (ret ? EXIT_FAILURE : EXIT_SUCCESS);
+  return 1;
 }
