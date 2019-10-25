@@ -4938,6 +4938,36 @@ set_limits ()
     error (EXIT_FAILURE, errno, "cannot set nofile rlimit");
 }
 
+static char *
+load_default_plugins ()
+{
+  DIR *dp = NULL;
+  char *plugins = strdup ("");
+
+  dp = opendir (PKGLIBEXECDIR);
+  if (dp == NULL)
+    return plugins;
+
+  for (;;)
+    {
+      struct dirent *dent;
+
+      dent = readdir (dp);
+      if (dent == NULL)
+        break;
+      if (dent->d_type != DT_DIR)
+        {
+          char *new_plugins = NULL;
+          asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins);
+          free (plugins);
+          plugins = new_plugins;
+        }
+    }
+  closedir (dp);
+
+  return plugins;
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -5042,8 +5072,10 @@ main (int argc, char *argv[])
         error (EXIT_FAILURE, errno, "cannot convert %s", lo.timeout_str);
     }
 
-  if (lo.plugins)
-    lo.plugins_ctx = load_plugins (lo.plugins);
+  if (lo.plugins == NULL)
+    lo.plugins = load_default_plugins ();
+
+  lo.plugins_ctx = load_plugins (lo.plugins);
 
   layers = read_dirs (&lo, lo.lowerdir, true, NULL);
   if (layers == NULL)
@@ -5133,8 +5165,7 @@ err_out1:
 
   hash_free (lo.inodes);
 
-  if (lo.plugins)
-    plugin_free_all (lo.plugins_ctx);
+  plugin_free_all (lo.plugins_ctx);
 
   free_mapping (lo.uid_mappings);
   free_mapping (lo.gid_mappings);

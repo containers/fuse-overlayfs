@@ -8,6 +8,8 @@ EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse
 
 CLEANFILES = fuse-overlayfs.1
 
+AM_CPPFLAGS = -DPKGLIBEXECDIR='"$(pkglibexecdir)"'
+
 fuse_overlayfs_CFLAGS = -I . -I $(abs_srcdir)/lib $(FUSE_CFLAGS)
 fuse_overlayfs_LDFLAGS =
 fuse_overlayfs_LDADD = lib/libgnu.a $(FUSE_LIBS)
