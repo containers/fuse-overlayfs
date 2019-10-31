@@ -83,3 +83,18 @@ touch merged/usr 2>&1 | grep Read-only
 mkdir merged/abcd12345 2>&1 | grep Read-only
 ln merged/file-lower-layer merged/file-lower-layer-link 2>&1 | grep Read-only
 ln -s merged/file-lower-layer merged/a-symlink 2>&1 | grep Read-only
+
+umount merged
+
+# https://github.com/containers/fuse-overlayfs/issues/136
+rm -rf lower1 lower2 lower3 lower upper workdir merged
+mkdir lower1 lower2 lower3 upper workdir merged
+
+mkdir -p lower1/dir1/dir2
+touch lower1/dir1/dir2/foo
+touch lower2/.wh.dir1
+mkdir -p lower3/dir1/dir2
+
+fuse-overlayfs -o lowerdir=lower3:lower2:lower1,upperdir=upper,workdir=workdir merged
+
+test \! -e merged/dir1/dir2/foo

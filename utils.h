@@ -18,36 +18,28 @@
 #ifndef UTILS_H
 # define UTILS_H
 
-void
-cleanup_freep (void *p)
-{
-  void **pp = (void **) p;
-  free (*pp);
-}
+# define _GNU_SOURCE
 
-void
-cleanup_filep (FILE **f)
-{
-  FILE *file = *f;
-  if (file)
-    (void) fclose (file);
-}
+# include <config.h>
 
-void
-cleanup_closep (void *p)
-{
-  int *pp = p;
-  if (*pp >= 0)
-    close (*pp);
-}
+# include <unistd.h>
+# include <stdio.h>
+# include <sys/types.h>
+# include <dirent.h>
+# include <stdlib.h>
+# include <sys/types.h>
+# include <fcntl.h>
+# include "fuse-overlayfs.h"
 
-void
-cleanup_dirp (DIR **p)
-{
-  DIR *dir = *p;
-  if (dir)
-    closedir (dir);
-}
+void cleanup_freep (void *p);
+void cleanup_filep (FILE **f);
+void cleanup_closep (void *p);
+void cleanup_dirp (DIR **p);
+
+int file_exists_at (int dirfd, const char *pathname);
+
+int strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3);
+int open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, int flags);
 
 # define cleanup_file __attribute__((cleanup (cleanup_filep)))
 # define cleanup_free __attribute__((cleanup (cleanup_freep)))
@@ -56,5 +48,9 @@ cleanup_dirp (DIR **p)
 
 # define LIKELY(x) __builtin_expect((x),1)
 # define UNLIKELY(x) __builtin_expect((x),0)
+
+# ifdef HAVE_STATX
+void statx_to_stat (struct statx *stx, struct stat *st);
+# endif
 
 #endif
