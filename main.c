@@ -1187,10 +1187,16 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       struct stat st;
       struct ovl_layer *it;
       cleanup_free char *npath = NULL;
+      char whiteout_path[PATH_MAX];
 
       npath = strdup (ret->path);
       if (npath == NULL)
         return NULL;
+
+      if (parent)
+        strconcat3 (whiteout_path, PATH_MAX, parent->path, "/.wh.", name);
+      else
+        strconcat3 (whiteout_path, PATH_MAX, "/.wh.", name, NULL);
 
       for (it = layer; it; it = it->next)
         {
@@ -1199,6 +1205,18 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
+
+          if (dir_p)
+            {
+              int r;
+
+              r = it->ds->file_exists (it, whiteout_path);
+              if (r < 0 && errno != ENOENT && errno != ENOTDIR)
+               return NULL;
+
+              if (r == 0)
+                break;
+            }
 
           if (! fast_ino_check)
             fd = it->ds->openat (it, npath, O_RDONLY|O_NONBLOCK|O_NOFOLLOW, 0755);
@@ -1348,7 +1366,9 @@ static struct ovl_node *
 load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char *path, char *name)
 {
   struct dirent *dent;
+  bool stop_lookup = false;
   struct ovl_layer *it, *upper_layer = get_upper_layer (lo);
+  char parent_whiteout_path[PATH_MAX];
 
   if (!n)
     {
@@ -1360,9 +1380,28 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         }
     }
 
-  for (it = lo->layers; it; it = it->next)
+  if (n->parent)
+    strconcat3 (parent_whiteout_path, PATH_MAX, n->parent->path, "/.wh.", name);
+  else
+    strconcat3 (parent_whiteout_path, PATH_MAX, ".wh.", name, NULL);
+
+  for (it = lo->layers; it && !stop_lookup; it = it->next)
     {
+      int ret;
       DIR *dp = NULL;
+
+      if (n->last_layer == it)
+        stop_lookup = true;
+
+      ret = it->ds->file_exists (it, parent_whiteout_path);
+      if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+        {
+          it->ds->closedir (dp);
+          return NULL;
+        }
+
+      if (ret == 0)
+        break;
 
       dp = it->ds->opendir (it, path);
       if (dp == NULL)
@@ -1370,7 +1409,6 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
       for (;;)
         {
-          int ret;
           struct ovl_node key;
           struct ovl_node *child = NULL;
           char node_path[PATH_MAX];
@@ -1413,7 +1451,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
 
           ret = it->ds->file_exists (it, whiteout_path);
-          if (ret < 0 && errno != ENOENT)
+          if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
             {
               it->ds->closedir (dp);
               return NULL;
@@ -1481,16 +1519,13 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
-            if (insert_node (n, child, false) == NULL)
-              {
-                errno = ENOMEM;
-                it->ds->closedir (dp);
-                return NULL;
-              }
+          if (insert_node (n, child, false) == NULL)
+            {
+              errno = ENOMEM;
+              it->ds->closedir (dp);
+              return NULL;
+            }
         }
-
-      if (n->last_layer == it)
-        break;
     }
 
   if (get_timeout (lo) > 0)
@@ -1685,13 +1720,17 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       int ret;
       struct ovl_layer *it;
       struct stat st;
+      bool stop_lookup = false;
       struct ovl_layer *upper_layer = get_upper_layer (lo);
 
-      for (it = lo->layers; it; it = it->next)
+      for (it = lo->layers; it && !stop_lookup; it = it->next)
         {
           char path[PATH_MAX];
           char whpath[PATH_MAX];
           const char *wh_name;
+
+          if (pnode && pnode->last_layer == it)
+            stop_lookup = true;
 
           strconcat3 (path, PATH_MAX, pnode->path, "/", name);
 
@@ -1737,7 +1776,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
           strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
           ret = it->ds->file_exists (it, whpath);
-          if (ret < 0 && errno != ENOENT)
+          if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
             return NULL;
           if (ret == 0)
               node = make_whiteout_node (path, name);
@@ -1773,9 +1812,6 @@ insert_node:
               errno = ENOMEM;
               return NULL;
             }
-
-          if (pnode && pnode->last_layer == it)
-            break;
         }
     }
 
