@@ -1526,6 +1526,18 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
               return NULL;
             }
         }
+
+      ret = is_directory_opaque (it, path);
+      if (ret < 0)
+        {
+          it->ds->closedir (dp);
+          return NULL;
+        }
+      if (ret > 0)
+        {
+          n->last_layer = it;
+          stop_lookup = true;
+        }
     }
 
   if (get_timeout (lo) > 0)
@@ -1803,7 +1815,10 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                   return NULL;
                 }
               if (ret > 0)
-                node->last_layer = it;
+                {
+                  node->last_layer = it;
+                  stop_lookup = true;
+                }
             }
 insert_node:
           if (insert_node (pnode, node, false) == NULL)
