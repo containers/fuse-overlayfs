@@ -2365,7 +2365,7 @@ static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 
 static int
 create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
-                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, struct stat *st_out)
+                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
 {
   int ret;
   cleanup_close int dfd = -1;
@@ -2432,6 +2432,13 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
         goto out;
     }
 
+  if (set_opaque)
+    {
+      ret = set_fd_opaque (dfd);
+      if (ret < 0)
+        goto out;
+    }
+
   if (st_out)
     {
       ret = fstat (dfd, st_out);
@@ -2485,7 +2492,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   times[0] = st.st_atim;
   times[1] = st.st_mtim;
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, NULL);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
   if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
@@ -4496,8 +4503,14 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 
   ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
                           get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask,
-                          parent_upperdir_only ? &st : NULL);
+                          true, &st);
   if (ret < 0)
+    {
+      fuse_reply_err (req, errno);
+      return;
+    }
+
+  if (need_delete_whiteout && delete_whiteout (lo, -1, pnode, name) < 0)
     {
       fuse_reply_err (req, errno);
       return;
@@ -4539,12 +4552,6 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
           fuse_reply_err (req, errno);
           return;
         }
-    }
-
-  if (need_delete_whiteout && delete_whiteout (lo, -1, pnode, name) < 0)
-    {
-      fuse_reply_err (req, errno);
-      return;
     }
 
   memset (&e, 0, sizeof (e));
