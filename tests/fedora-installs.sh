@@ -98,3 +98,18 @@ mkdir -p lower3/dir1/dir2
 fuse-overlayfs -o lowerdir=lower3:lower2:lower1,upperdir=upper,workdir=workdir merged
 
 test \! -e merged/dir1/dir2/foo
+
+umount merged
+
+# https://github.com/containers/fuse-overlayfs/issues/138
+rm -rf lower1 lower2 lower3 lower upper workdir merged
+mkdir lower1 lower2 lower3 upper workdir merged
+
+mkdir -p lower1/dir1/dir2
+touch lower1/dir1/dir2/foo
+mkdir -p lower3/dir1/dir2
+touch lower3/dir1/dir2/.wh..wh..opq
+
+fuse-overlayfs -o lowerdir=lower3:lower2:lower1,upperdir=upper,workdir=workdir merged
+
+test \! -e merged/dir1/dir2/foo
