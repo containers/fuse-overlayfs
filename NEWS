@@ -1,3 +1,9 @@
+* fuse-overlayfs-0.7
+
+- plugins support.  It allows to read the lower layers from a different data source.
+- support running without an upper layer in read only mode.
+- honor opaque whiteouts.
+
 * fuse-overlayfs-0.6.5
 
 - stat reports correctly the number of links for a directory.
