@@ -113,3 +113,17 @@ touch lower3/dir1/dir2/.wh..wh..opq
 fuse-overlayfs -o lowerdir=lower3:lower2:lower1,upperdir=upper,workdir=workdir merged
 
 test \! -e merged/dir1/dir2/foo
+
+umount merged
+
+# https://github.com/containers/fuse-overlayfs/issues/143
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+touch lower/deps.txt
+ln -s src/deps.txt upper/
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+test \! -e merged/dir1/dir2/foo
+
+touch -h merged/deps.txt
