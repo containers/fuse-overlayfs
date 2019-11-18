@@ -4887,7 +4887,7 @@ static struct fuse_lowlevel_ops ovl_oper =
    .fsyncdir = ovl_fsyncdir,
    .ioctl = ovl_ioctl,
    .fallocate = ovl_fallocate,
-#ifdef HAVE_COPY_FILE_RANGE
+#if HAVE_COPY_FILE_RANGE && HAVE_FUSE_COPY_FILE_RANGE
    .copy_file_range = ovl_copy_file_range,
 #endif
   };

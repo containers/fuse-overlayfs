@@ -49,10 +49,28 @@ void foo()
 ],
 [cache_readdir=1],
 [cache_readdir=0])
+
+
+AC_COMPILE_IFELSE(
+[
+AC_LANG_SOURCE([
+#define FUSE_USE_VERSION 32
+#include <fuse_lowlevel.h>
+void foo()
+{
+        struct fuse_lowlevel_ops ops;
+        ops.copy_file_range = 0;
+}])
+],
+[fuse_has_copy_file_range=1],
+[fuse_has_copy_file_range=0])
+
+
 CFLAGS=$old_CFLAGS
 LDFLAGS=$old_LDFLAGS
 
-AC_DEFINE_UNQUOTED([HAVE_FUSE_CACHE_READDIR], $cache_readdir, [Define if libfuse is available])
+AC_DEFINE_UNQUOTED([HAVE_FUSE_CACHE_READDIR], $cache_readdir, [Define if libfuse cache_readdir is available])
+AC_DEFINE_UNQUOTED([HAVE_FUSE_COPY_FILE_RANGE], $fuse_has_copy_file_range, [Define if libfuse has copy_file_range is available])
 
 AC_SEARCH_LIBS([dlopen], [dl], [], [AC_MSG_ERROR([unable to find dlopen()])])
 
