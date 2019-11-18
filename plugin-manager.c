@@ -19,7 +19,7 @@
 #include <config.h>
 #include <plugin.h>
 #include <stdlib.h>
-#include <error.h>
+#include <fuse_overlayfs_error.h>
 #include <errno.h>
 #include <string.h>
 

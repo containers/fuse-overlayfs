@@ -43,21 +43,7 @@
 # include <sys/sendfile.h>
 #endif
 
-#ifdef HAVE_ERROR_H
-# include <error.h>
-#else
-# define error(status, errno, fmt, ...) do {                           \
-    if (errno == 0)                                                     \
-      fprintf (stderr, "fuse-overlayfs: " fmt "\n", ##__VA_ARGS__);     \
-    else                                                                \
-      {                                                                 \
-        fprintf (stderr, "fuse-overlayfs: " fmt, ##__VA_ARGS__);        \
-        fprintf (stderr, ": %s\n", strerror (errno));                   \
-      }                                                                 \
-    if (status)                                                         \
-      exit (status);                                                    \
-  } while(0)
-#endif
+#include <fuse_overlayfs_error.h>
 
 #include <inttypes.h>
 #include <fcntl.h>
