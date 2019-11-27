@@ -1,0 +1,2 @@
+FROM alpine
+RUN apk add make gcc fuse3-dev libc-dev go-md2man linux-headers automake autoconf gettext
