@@ -1432,7 +1432,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 }
             }
 
-          strconcat3 (whiteout_path, PATH_MAX, ".wh.", dent->d_name, NULL);
+          strconcat3 (whiteout_path, PATH_MAX, path, "/.wh.", dent->d_name);
 
           strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
 
