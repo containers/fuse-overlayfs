@@ -1,3 +1,8 @@
+* fuse-overlayfs-0.7.1
+
+- fix an issue where a whiteout in the parent directory could hide
+  files in the sub directories.
+
 * fuse-overlayfs-0.7
 
 - plugins support.  It allows to read the lower layers from a different data source.
