@@ -25,6 +25,7 @@ addons:
       - go-md2man
 before_install:
   - docker pull fedora &
+  - docker build -t alpine-build -f Dockerfile.alpine .
   - (wget https://dl.google.com/go/go1.10.8.linux-amd64.tar.gz && tar xf go1.10.8.linux-amd64.tar.gz && sudo mv go /usr/local)
   - sudo mkdir -p /lower /upper /mnt
   - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
@@ -44,3 +45,4 @@ script:
   - sudo tests/unlink.sh || travis_terminate 1;
   - (cd $GOPATH/src/github.com/containers/storage/tests; sudo STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
   - (cd $GOPATH/src/github.com/containers/storage/tests; sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash) || travis_terminate 1;
+  - docker run --rm  -v $(pwd):/fuse-overlayfs alpine-build sh -c 'cd /fuse-overlayfs; ./autogen.sh && ./configure && make clean && make'
