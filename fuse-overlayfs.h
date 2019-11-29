@@ -57,7 +57,6 @@ struct ovl_node
   unsigned int hidden : 1;
   unsigned int whiteout : 1;
   unsigned int loaded : 1;
-  unsigned int no_security_capability : 1;
 };
 
 struct ovl_mapping
