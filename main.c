@@ -2253,7 +2253,6 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
-  bool is_security_capability = false;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -2265,19 +2264,10 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
-  if (get_timeout (lo) > 0)
-    is_security_capability = has_prefix (name, "security.capability");
-
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
     {
       fuse_reply_err (req, ENOENT);
-      return;
-    }
-
-  if (is_security_capability && node->no_security_capability)
-    {
-      fuse_reply_err (req, ENODATA);
       return;
     }
 
@@ -2299,9 +2289,6 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       strconcat3 (path, PATH_MAX, lo->workdir, "/", node->path);
       ret = getxattr (path, name, buf, size);
     }
-
-  if (get_timeout (lo) > 0 && is_security_capability && ret < 0 && errno == ENODATA)
-    node->no_security_capability = 1;
 
   if (ret < 0)
     {
@@ -3002,7 +2989,6 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
 {
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
-  bool is_security_capability = false;
   struct ovl_node *node;
   int ret;
 
@@ -3021,8 +3007,6 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       fuse_reply_err (req, EPERM);
       return;
     }
-
-  is_security_capability = has_prefix (name, "security.capability");
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL)
@@ -3052,7 +3036,6 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
-  node->no_security_capability = 1;
   fuse_reply_err (req, 0);
 }
 
@@ -4543,7 +4526,6 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       node->last_layer = pnode->last_layer;
       if (get_timeout (lo) > 0)
         node->loaded = 1;
-      node->no_security_capability = 1;
     }
   else
     {
