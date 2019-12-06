@@ -47,19 +47,12 @@ the install script will usually create the device automatically; or
 
 4. Launch the build with the command (note the single dot `.` at the end): 
 ```
-buildah bud --device /dev/fuse -t fuse-overlayfs -f ./Dockerfile.static .
+buildah bud -v $PWD:/build/fuse-overlayfs -t fuse-overlayfs -f ./Dockerfile.simpler .
 ```
 
 5. Copy the resulting binary to your host:
 
-  * if you have `podman` installed:
 ```
-podman run --rm --entrypoint="[]" fuse-overlayfs cat /usr/bin/fuse-overlayfs | sudo tee /usr/bin/fuse-overlayfs > /dev/null
-```
-  * or, if you only have `buildah` installed:
-```
-container="$(buildah from fuse-overlayfs)"
-buildah run "$container" cat /usr/bin/fuse-overlayfs | sudo tee /usr/bin/fuse-overlayfs > /dev/null
-buildah rm "$container"
+sudo cp fuse-overlayfs /usr/bin/
 ```
 
