@@ -467,7 +467,7 @@ set_fd_opaque (int fd)
     {
       if (errno == ENOTSUP)
         goto create_opq_whiteout;
-      if (errno != EPERM || fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0 && errno != ENOTSUP)
+      if (errno != EPERM || (fsetxattr (fd, OPAQUE_XATTR, "y", 1, 0) < 0 && errno != ENOTSUP))
           return -1;
     }
  create_opq_whiteout:
@@ -698,7 +698,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 static void
 node_mark_all_free (void *p)
 {
-  struct ovl_node *it, *tmp, *n = (struct ovl_node *) p;
+  struct ovl_node *it, *n = (struct ovl_node *) p;
 
   for (it = n->next_link; it; it = it->next_link)
     it->ino->lookups = 0;
@@ -925,7 +925,6 @@ node_compare (const void *n1, const void *n2)
 static struct ovl_node *
 register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
 {
-  int ret;
   struct ovl_ino key;
   struct ovl_ino *ino = NULL;
 
@@ -1726,7 +1725,6 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
       struct ovl_layer *it;
       struct stat st;
       bool stop_lookup = false;
-      struct ovl_layer *upper_layer = get_upper_layer (lo);
 
       for (it = lo->layers; it && !stop_lookup; it = it->next)
         {
@@ -2001,7 +1999,6 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
       else
         {
           struct dirent *dent;
-          int fd = cleanup_fd;
 
           cleanup_fd = -1;  /* Now owned by dp.  */
 
@@ -2152,7 +2149,7 @@ ovl_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
 {
   cleanup_lock int l = enter_big_lock ();
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_readdir(ino=%" PRIu64 ", size=%zu, offset=%llo)\n", ino, size, offset);
+    fprintf (stderr, "ovl_readdir(ino=%" PRIu64 ", size=%zu, offset=%lo)\n", ino, size, offset);
   ovl_do_readdir (req, ino, size, offset, fi, 0);
 }
 
@@ -2162,7 +2159,7 @@ ovl_readdirplus (fuse_req_t req, fuse_ino_t ino, size_t size,
 {
   cleanup_lock int l = enter_big_lock ();
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_readdirplus(ino=%" PRIu64 ", size=%zu, offset=%llo)\n", ino, size, offset);
+    fprintf (stderr, "ovl_readdirplus(ino=%" PRIu64 ", size=%zu, offset=%lo)\n", ino, size, offset);
   ovl_do_readdir (req, ino, size, offset, fi, 1);
 }
 
@@ -2172,7 +2169,6 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   cleanup_lock int l = enter_big_lock ();
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
-  struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
@@ -2315,7 +2311,6 @@ static void
 ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 {
   cleanup_lock int l = enter_big_lock ();
-  int ret;
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *n = do_lookup_file (lo, ino, NULL);
 
@@ -2323,7 +2318,7 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
     fprintf (stderr, "ovl_access(ino=%" PRIu64 ", mask=%d)\n",
 	     ino, mask);
 
-  if (mask & n->ino->mode == mask)
+  if ((mask & n->ino->mode) == mask)
     fuse_reply_err (req, 0);
   else
     fuse_reply_err (req, EPERM);
@@ -2837,7 +2832,6 @@ empty_dir (struct ovl_layer *l, const char *path)
 {
   cleanup_dir DIR *dp = NULL;
   cleanup_close int cleanup_fd = -1;
-  struct dirent *dent;
   int ret;
 
   cleanup_fd = TEMP_FAILURE_RETRY (openat (l->fd, path, O_DIRECTORY));
@@ -3158,7 +3152,6 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   bool readonly = (flags & (O_APPEND | O_RDWR | O_WRONLY | O_CREAT | O_TRUNC)) == 0;
   cleanup_free char *path = NULL;
   cleanup_close int fd = -1;
-  const struct fuse_ctx *ctx = fuse_req_ctx (req);
   uid_t uid;
   gid_t gid;
   bool need_delete_whiteout = true;
@@ -3389,7 +3382,6 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   cleanup_lock int l = enter_big_lock ();
   cleanup_close int fd = -1;
   struct fuse_entry_param e;
-  struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node = NULL;
   struct stat st;
 
@@ -3891,7 +3883,6 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_node *pnode, *node, *destnode, *destpnode;
   struct ovl_data *lo = ovl_data (req);
   int ret;
-  int saved_errno;
   cleanup_close int srcfd = -1;
   cleanup_close int destfd = -1;
   struct ovl_node *rm1, *rm2;
@@ -4733,7 +4724,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_fallocate(ino=%" PRIu64 ", mode=%d, offset=%llo, length=%llu, fi=%p)\n",
+    fprintf (stderr, "ovl_fallocate(ino=%" PRIu64 ", mode=%d, offset=%lo, length=%lu, fi=%p)\n",
              ino, mode, offset, length, fi);
 
   node = do_lookup_file (lo, ino, NULL);
@@ -4784,7 +4775,7 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
   ssize_t ret;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_copy_file_range(ino_in=%" PRIu64 ", off_in=%llo, fi_in=%p), ino_out=%" PRIu64 ", off_out=%llo, fi_out=%p, size=%zu, flags=%d)\n",
+    fprintf (stderr, "ovl_copy_file_range(ino_in=%" PRIu64 ", off_in=%lo, fi_in=%p, ino_out=%" PRIu64 ", off_out=%lo, fi_out=%p, size=%zu, flags=%d)\n",
              ino_in, off_in, fi_in, ino_out, off_out, fi_out, len, flags);
 
   node = do_lookup_file (lo, ino_in, NULL);

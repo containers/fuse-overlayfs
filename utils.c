@@ -136,8 +136,6 @@ cleanup_dirp (DIR **p)
 int
 open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, int flags)
 {
-  int ret;
-
   out[0] = '\0';
 
   *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0755);
