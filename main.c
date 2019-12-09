@@ -1067,12 +1067,19 @@ make_whiteout_node (const char *path, const char *name)
 
   new_name = strdup (name);
   if (new_name == NULL)
+    {
+      free (ret);
       return NULL;
+    }
   node_set_name (ret, new_name);
 
   ret->path = strdup (path);
   if (ret->path == NULL)
-    return NULL;
+    {
+      free (new_name);
+      free (ret);
+      return NULL;
+    }
 
   ret->whiteout = 1;
   ret->ino = &dummy_ino;
@@ -4588,6 +4595,11 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
   l = enter_big_lock ();
 
   node = do_lookup_file (lo, ino, NULL);
+  if (node == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
 
   /* Skip fsync for lower layers.  */
   do_fsync = node && node->layer == get_upper_layer (lo);
