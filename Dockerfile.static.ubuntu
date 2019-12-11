@@ -1,0 +1,11 @@
+FROM docker.io/ubuntu:rolling
+WORKDIR /build
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+        libc6-dev gcc g++ make automake autoconf clang pkgconf libfuse3-dev
+
+RUN cd fuse-overlayfs && \
+    sh autogen.sh && \
+    LIBS="-ldl" LDFLAGS="-static" ./configure --prefix /usr && \
+    make
+
