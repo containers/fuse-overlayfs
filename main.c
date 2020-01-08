@@ -2516,7 +2516,6 @@ copy_fd_to_fd (int sfd, int dfd, char *buf, size_t buf_size)
         ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
         if (ret < 0)
           return ret;
-        written += ret;
         nread -= ret;
       }
       while (nread);
@@ -2830,7 +2829,6 @@ empty_dirfd (int fd)
 static int
 empty_dir (struct ovl_layer *l, const char *path)
 {
-  cleanup_dir DIR *dp = NULL;
   cleanup_close int cleanup_fd = -1;
   int ret;
 
