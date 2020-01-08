@@ -94,8 +94,6 @@ strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char 
 
       memcpy (current, s3, t);
       current += t;
-
-      size -= t;
     }
   *current = '\0';
 
