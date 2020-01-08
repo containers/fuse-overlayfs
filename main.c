@@ -2516,7 +2516,6 @@ copy_fd_to_fd (int sfd, int dfd, char *buf, size_t buf_size)
         ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
         if (ret < 0)
           return ret;
-        written += ret;
         nread -= ret;
       }
       while (nread);
