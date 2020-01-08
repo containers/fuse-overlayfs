@@ -2021,6 +2021,8 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
                 continue;
               if (strcmp (dent->d_name, "..") == 0)
                 continue;
+              if (has_prefix (dent->d_name, ".wh."))
+                continue;
 
               node_set_name (&key, (char *) dent->d_name);
 
