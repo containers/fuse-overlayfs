@@ -4176,6 +4176,8 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (update_paths (node) < 0)
     goto error;
 
+  node->loaded = 0;
+
   ret = 0;
   goto cleanup;
 
