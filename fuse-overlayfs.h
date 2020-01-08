@@ -134,7 +134,7 @@ struct data_source
 };
 
 /* passtrough to the file system.  */
-struct data_source direct_access_ds;
+extern struct data_source direct_access_ds;
 
 # ifndef HAVE_STATX
 #  define STATX_TYPE		0x00000001U	/* Want/got stx_mode & S_IFMT */
