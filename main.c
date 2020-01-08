@@ -1387,10 +1387,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
       ret = it->ds->file_exists (it, parent_whiteout_path);
       if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
-        {
-          it->ds->closedir (dp);
-          return NULL;
-        }
+        return NULL;
 
       if (ret == 0)
         break;
@@ -1530,6 +1527,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           n->last_layer = it;
           stop_lookup = true;
         }
+      it->ds->closedir (dp);
     }
 
   if (get_timeout (lo) > 0)
@@ -1980,27 +1978,19 @@ create_missing_whiteouts (struct ovl_data *lo, struct ovl_node *node, const char
   for (l = get_lower_layers (lo); l; l = l->next)
     {
       cleanup_dir DIR *dp = NULL;
-      cleanup_close int cleanup_fd = -1;
 
-      cleanup_fd = l->ds->openat (l, from, O_DIRECTORY, 0755);
-      if (cleanup_fd < 0)
+      dp = l->ds->opendir (l, from);
+      if (dp == NULL)
         {
-          if (errno == ENOENT)
-            continue;
           if (errno == ENOTDIR)
             break;
-
+          if (errno == ENOENT)
+            continue;
           return -1;
         }
-
-      dp = fdopendir (cleanup_fd);
-      if (dp == NULL)
-        return -1;
       else
         {
           struct dirent *dent;
-
-          cleanup_fd = -1;  /* Now owned by dp.  */
 
           for (;;)
             {
