@@ -4593,6 +4593,12 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
   /* Skip fsync for lower layers.  */
   do_fsync = node && node->layer == get_upper_layer (lo);
 
+  if (node->layer == NULL)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
   if (fd < 0)
     strcpy (path, node->path);
 
