@@ -2829,7 +2829,6 @@ empty_dirfd (int fd)
 static int
 empty_dir (struct ovl_layer *l, const char *path)
 {
-  cleanup_dir DIR *dp = NULL;
   cleanup_close int cleanup_fd = -1;
   int ret;
 
