@@ -1,3 +1,10 @@
+* fuse-overlayfs-0.7.3
+
+- fix build with -fno-common
+- fix possible segmentation fault in direct_fsync()
+- use the data store to create missing whiteouts.
+- after a rename, force a directory reload.
+
 * fuse-overlayfs-0.7.2
 
 - drop special handling for security.capability.
