@@ -4719,6 +4719,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
   struct ovl_data *lo = ovl_data (req);
   cleanup_close int fd = -1;
   struct ovl_node *node;
+  int dirfd;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -4739,7 +4740,8 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
       return;
     }
 
-  fd = node->layer->ds->openat (node->layer, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0755);
+  dirfd = node_dirfd (node);
+  fd = openat (dirfd, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0755);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
