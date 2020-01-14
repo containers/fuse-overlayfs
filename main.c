@@ -2260,7 +2260,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
     }
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -2849,7 +2849,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   struct ovl_node key, *rm;
 
   node = do_lookup_file (lo, parent, name);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -2895,7 +2895,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
     }
 
   pnode = do_lookup_file (lo, parent, NULL);
-  if (pnode == NULL)
+  if (pnode == NULL || pnode->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3000,7 +3000,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
     }
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3060,7 +3060,7 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
     fprintf (stderr, "ovl_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3439,7 +3439,7 @@ ovl_getattr (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
     fprintf (stderr, "ovl_getattr(ino=%" PRIu64 ")\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3473,7 +3473,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     fprintf (stderr, "ovl_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3655,7 +3655,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
     fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3669,7 +3669,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
     }
 
   newparentnode = do_lookup_file (lo, newparent, NULL);
-  if (newparentnode == NULL)
+  if (newparentnode == NULL || newparentnode->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3794,7 +3794,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
     fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
 
   pnode = do_lookup_file (lo, parent, NULL);
-  if (pnode == NULL)
+  if (pnode == NULL || pnode->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -3882,7 +3882,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   char *tmp;
 
   node = do_lookup_file (lo, parent, name);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -4243,7 +4243,7 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
     fprintf (stderr, "ovl_readlink(ino=%" PRIu64 "s)\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -4581,7 +4581,7 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
   l = enter_big_lock ();
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -4660,7 +4660,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
              ino, cmd, arg, fi, flags, in_buf, in_bufsz, out_bufsz);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -4730,7 +4730,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
              ino, mode, offset, length, fi);
 
   node = do_lookup_file (lo, ino, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
@@ -4782,14 +4782,14 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
              ino_in, off_in, fi_in, ino_out, off_out, fi_out, len, flags);
 
   node = do_lookup_file (lo, ino_in, NULL);
-  if (node == NULL)
+  if (node == NULL || node->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
     }
 
   dnode = do_lookup_file (lo, ino_out, NULL);
-  if (dnode == NULL)
+  if (dnode == NULL || dnode->whiteout)
     {
       fuse_reply_err (req, ENOENT);
       return;
