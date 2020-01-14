@@ -3149,6 +3149,8 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
 
   flags |= O_NOFOLLOW;
 
+  flags &= ~O_DIRECT;
+
   if (lo->writeback)
     {
       if ((flags & O_ACCMODE) == O_WRONLY)
@@ -3287,7 +3289,7 @@ ovl_read (fuse_req_t req, fuse_ino_t ino, size_t size,
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_read(ino=%" PRIu64 ", size=%zd, "
 	     "off=%lu)\n", ino, size, (unsigned long) offset);
-  buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+  buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK | FUSE_BUF_FD_RETRY;
   buf.buf[0].fd = fi->fh;
   buf.buf[0].pos = offset;
   fuse_reply_data (req, &buf, 0);
@@ -3303,7 +3305,8 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
   struct ovl_ino *inode;
   int saved_errno;
   struct fuse_bufvec out_buf = FUSE_BUFVEC_INIT (fuse_buf_size (in_buf));
-  out_buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+
+  out_buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK | FUSE_BUF_FD_RETRY;
   out_buf.buf[0].fd = fi->fh;
   out_buf.buf[0].pos = off;
 
@@ -4719,6 +4722,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
   struct ovl_data *lo = ovl_data (req);
   cleanup_close int fd = -1;
   struct ovl_node *node;
+  int dirfd;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -4739,7 +4743,8 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
       return;
     }
 
-  fd = node->layer->ds->openat (node->layer, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0755);
+  dirfd = node_dirfd (node);
+  fd = openat (dirfd, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0755);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
