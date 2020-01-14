@@ -3287,7 +3287,7 @@ ovl_read (fuse_req_t req, fuse_ino_t ino, size_t size,
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_read(ino=%" PRIu64 ", size=%zd, "
 	     "off=%lu)\n", ino, size, (unsigned long) offset);
-  buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+  buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK | FUSE_BUF_FD_RETRY;
   buf.buf[0].fd = fi->fh;
   buf.buf[0].pos = offset;
   fuse_reply_data (req, &buf, 0);
@@ -3303,7 +3303,8 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
   struct ovl_ino *inode;
   int saved_errno;
   struct fuse_bufvec out_buf = FUSE_BUFVEC_INIT (fuse_buf_size (in_buf));
-  out_buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
+
+  out_buf.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK | FUSE_BUF_FD_RETRY;
   out_buf.buf[0].fd = fi->fh;
   out_buf.buf[0].pos = off;
 
