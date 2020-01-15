@@ -2328,7 +2328,13 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
       for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
         {
           cleanup_free char *v = NULL;
-          ssize_t s = safe_read_xattr (&v, sfd, it, 256);
+          ssize_t s;
+
+          if (has_prefix (it, XATTR_PREFIX)
+              || has_prefix (it, PRIVILEGED_XATTR_PREFIX))
+            continue;
+
+          s = safe_read_xattr (&v, sfd, it, 256);
           if (s < 0)
             return -1;
 
