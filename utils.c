@@ -23,6 +23,15 @@
 #include <string.h>
 #include <sys/sysmacros.h>
 
+#ifndef TEMP_FAILURE_RETRY
+#define TEMP_FAILURE_RETRY(expression) \
+  (__extension__                                                              \
+    ({ long int __result;                                                     \
+       do __result = (long int) (expression);                                 \
+       while (__result == -1L && errno == EINTR);                             \
+       __result; }))
+#endif
+
 int
 file_exists_at (int dirfd, const char *pathname)
 {
@@ -120,7 +129,7 @@ cleanup_closep (void *p)
 {
   int *pp = p;
   if (*pp >= 0)
-    close (*pp);
+    TEMP_FAILURE_RETRY (close (*pp));
 }
 
 void

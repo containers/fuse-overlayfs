@@ -456,6 +456,13 @@ has_prefix (const char *str, const char *pref)
   return false;
 }
 
+static bool
+can_access_xattr (const char *name)
+{
+  return !has_prefix (name, XATTR_PREFIX)               \
+    && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
+}
+
 static int
 set_fd_opaque (int fd)
 {
@@ -826,6 +833,15 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
       bool needs_whiteout;
 
       needs_whiteout = (node->last_layer != get_upper_layer (lo)) && (node->parent && node->parent->last_layer != get_upper_layer (lo));
+      if (!needs_whiteout && node_dirp (node))
+        {
+          ret = is_directory_opaque (get_upper_layer (lo), node->path);
+          if (ret < 0)
+            return ret;
+          if (ret)
+            needs_whiteout = true;
+        }
+
       if (needs_whiteout)
         {
           /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
@@ -2190,6 +2206,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
+  size_t i;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -2234,6 +2251,21 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 
   len = ret;
 
+  for (i = 0; buf && i < len;)
+    {
+      size_t current_len;
+      const char *cur_attr = buf + i;
+
+      current_len = strlen (cur_attr) + 1;
+      if (can_access_xattr (cur_attr))
+        i += current_len;
+      else
+        {
+          memmove (buf + i, cur_attr + current_len, len - current_len);
+          len -= current_len;
+        }
+    }
+
   if (size == 0)
     fuse_reply_xattr (req, len);
   else if (len <= size)
@@ -2256,6 +2288,12 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   if (lo->disable_xattrs)
     {
       fuse_reply_err (req, ENOSYS);
+      return;
+    }
+
+  if (! can_access_xattr (name))
+    {
+      fuse_reply_err (req, ENODATA);
       return;
     }
 
@@ -2330,8 +2368,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
           cleanup_free char *v = NULL;
           ssize_t s;
 
-          if (has_prefix (it, XATTR_PREFIX)
-              || has_prefix (it, PRIVILEGED_XATTR_PREFIX))
+          if (! can_access_xattr (it))
             continue;
 
           s = safe_read_xattr (&v, sfd, it, 256);
@@ -2361,7 +2398,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   char wd_tmp_file_name[32];
   bool need_rename;
 
-  need_rename = times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
+  need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
   if (!need_rename)
     {
       /* mkdir can be used directly without a temporary directory in the working directory.  */
