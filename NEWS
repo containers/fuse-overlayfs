@@ -1,3 +1,11 @@
+* fuse-overlayfs-0.7.4
+
+- fix fallocate for deleted files.
+- ignore O_DIRECT.  It causes issues with libfuse not using an aligned buffer, causing
+  write(2) to fail with EINVAL.
+- on copyup, do not copy the opaque xattr.
+- fix a wrong lookup for whiteout files, that could happen on a double unlink.
+
 * fuse-overlayfs-0.7.3
 
 - fix build with -fno-common
