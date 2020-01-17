@@ -833,6 +833,15 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
       bool needs_whiteout;
 
       needs_whiteout = (node->last_layer != get_upper_layer (lo)) && (node->parent && node->parent->last_layer != get_upper_layer (lo));
+      if (!needs_whiteout && node_dirp (node))
+        {
+          ret = is_directory_opaque (get_upper_layer (lo), node->path);
+          if (ret < 0)
+            return ret;
+          if (ret)
+            needs_whiteout = true;
+        }
+
       if (needs_whiteout)
         {
           /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
@@ -2389,7 +2398,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   char wd_tmp_file_name[32];
   bool need_rename;
 
-  need_rename = times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
+  need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
   if (!need_rename)
     {
       /* mkdir can be used directly without a temporary directory in the working directory.  */
