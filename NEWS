@@ -1,3 +1,7 @@
+* fuse-overlayfs-0.7.5
+
+- do not expose internal xattrs through listxattr and getxattr.
+
 * fuse-overlayfs-0.7.4
 
 - fix fallocate for deleted files.
