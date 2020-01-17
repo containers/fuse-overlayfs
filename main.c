@@ -456,6 +456,13 @@ has_prefix (const char *str, const char *pref)
   return false;
 }
 
+static bool
+can_access_xattr (const char *name)
+{
+  return !has_prefix (name, XATTR_PREFIX)               \
+    && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
+}
+
 static int
 set_fd_opaque (int fd)
 {
@@ -2190,6 +2197,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
+  size_t i;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -2234,6 +2242,21 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 
   len = ret;
 
+  for (i = 0; buf && i < len;)
+    {
+      size_t current_len;
+      const char *cur_attr = buf + i;
+
+      current_len = strlen (cur_attr) + 1;
+      if (can_access_xattr (cur_attr))
+        i += current_len;
+      else
+        {
+          memmove (buf + i, cur_attr + current_len, len - current_len);
+          len -= current_len;
+        }
+    }
+
   if (size == 0)
     fuse_reply_xattr (req, len);
   else if (len <= size)
@@ -2256,6 +2279,12 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   if (lo->disable_xattrs)
     {
       fuse_reply_err (req, ENOSYS);
+      return;
+    }
+
+  if (! can_access_xattr (name))
+    {
+      fuse_reply_err (req, ENODATA);
       return;
     }
 
@@ -2330,8 +2359,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
           cleanup_free char *v = NULL;
           ssize_t s;
 
-          if (has_prefix (it, XATTR_PREFIX)
-              || has_prefix (it, PRIVILEGED_XATTR_PREFIX))
+          if (! can_access_xattr (it))
             continue;
 
           s = safe_read_xattr (&v, sfd, it, 256);
