@@ -146,7 +146,7 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
   out[0] = '\0';
 
   *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0755);
-  if (*fd < 0 && (errno == ELOOP || errno == EISDIR))
+  if (*fd < 0 && (errno == ELOOP || errno == EISDIR || errno == ENXIO))
     {
       strconcat3 (out, PATH_MAX, l->path, "/", path);
       return 0;

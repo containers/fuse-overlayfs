@@ -1,7 +1,7 @@
 /* fuse-overlayfs: Overlay Filesystem in Userspace
 
    Copyright (C) 2018 Giuseppe Scrivano <giuseppe@scrivano.org>
-   Copyright (C) 2018-2019 Red Hat Inc.
+   Copyright (C) 2018-2020 Red Hat Inc.
    Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
    This program is free software: you can redistribute it and/or modify
@@ -461,6 +461,22 @@ can_access_xattr (const char *name)
 {
   return !has_prefix (name, XATTR_PREFIX)               \
     && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
+}
+
+static int
+set_fd_origin (int fd, const char *origin)
+{
+  cleanup_close int opq_whiteout_fd = -1;
+  size_t len = strlen (origin) + 1;
+  int ret;
+
+  ret = fsetxattr (fd, ORIGIN_XATTR, origin, len, 0);
+  if (ret < 0)
+    {
+      if (errno == ENOTSUP)
+        return 0;
+    }
+  return ret;
 }
 
 static int
@@ -1153,6 +1169,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
   mode_t mode = 0;
   char *new_name;
   struct ovl_node *ret_xchg;
+  bool has_origin = true;
   cleanup_node_init struct ovl_node *ret = NULL;
 
   ret = calloc (1, sizeof (*ret));
@@ -1233,10 +1250,13 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
             {
               if (it->ds->statat (it, npath, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE|STATX_MODE|STATX_INO) == 0)
                 {
-                  ret->tmp_ino = st.st_ino;
-                  ret->tmp_dev = st.st_dev;
-                  if (mode == 0)
-                    mode = st.st_mode;
+                  if (has_origin)
+                    {
+                      ret->tmp_ino = st.st_ino;
+                      ret->tmp_dev = st.st_dev;
+                      if (mode == 0)
+                        mode = st.st_mode;
+                    }
                   ret->last_layer = it;
                 }
                 goto no_fd;
@@ -1245,10 +1265,13 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
           /* It is an open FD, stat the file and read the origin xattrs.  */
           if (it->ds->fstat (it, fd, npath, STATX_TYPE|STATX_MODE|STATX_INO, &st) == 0)
             {
-              ret->tmp_ino = st.st_ino;
-              ret->tmp_dev = st.st_dev;
-              if (mode == 0)
-                mode = st.st_mode;
+              if (has_origin)
+                {
+                  ret->tmp_ino = st.st_ino;
+                  ret->tmp_dev = st.st_dev;
+                  if (mode == 0)
+                    mode = st.st_mode;
+                }
               ret->last_layer = it;
             }
 
@@ -1292,7 +1315,9 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
 
           /* If an origin is specified, use it for the next layer lookup.  */
           s = safe_read_xattr (&origin, fd, ORIGIN_XATTR, PATH_MAX);
-          if (s > 0)
+          if (s <= 0)
+            has_origin = false;
+          else
             {
               free (npath);
               npath = origin;
@@ -2690,6 +2715,9 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   ret = copy_xattr (sfd, dfd, buf, buf_size);
   if (ret < 0)
+    goto exit;
+
+  if (set_fd_origin (dfd, node->path) < 0)
     goto exit;
 
   /* Finally, move the file to its destination.  */
