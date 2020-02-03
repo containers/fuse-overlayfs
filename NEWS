@@ -1,3 +1,8 @@
+* fuse-overlayfs-0.7.6
+
+- do not look in lower layers for the ino if there is no origin xattr set.
+- attempt to use the file path if the operation on the fd fails with ENXIO.
+
 * fuse-overlayfs-0.7.5
 
 - do not expose internal xattrs through listxattr and getxattr.
