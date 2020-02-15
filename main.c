@@ -3809,7 +3809,12 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
 
   e.ino = node_to_inode (node);
   node->ino->lookups++;
-  e.attr_timeout = get_timeout (lo);
+  /*
+     There is an issue on RHEL 8.1 where the nlink counter is always
+     incremented by one, no matter what is specified in e.attr.st_nlink.
+     Always set timeout to 0 to force a new stat on the inode.
+   */
+  e.attr_timeout = 0;
   e.entry_timeout = get_timeout (lo);
   fuse_reply_entry (req, &e);
 }
