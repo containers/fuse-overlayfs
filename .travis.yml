@@ -29,7 +29,7 @@ before_install:
   - (wget https://dl.google.com/go/go1.13.7.linux-amd64.tar.gz && tar xf go1.13.7.linux-amd64.tar.gz && sudo mv go /usr/local)
   - sudo mkdir -p /lower /upper /mnt
   - (cd /; sudo git clone https://github.com/amir73il/unionmount-testsuite.git)
-  - (git clone --depth 1 git://github.com/ninja-build/ninja.git && cd ninja && python3.5 ./bootstrap.py && sudo cp ninja /usr/bin)
+  - (git clone --depth 1 git://github.com/ninja-build/ninja.git && cd ninja && python3.5 configure.py --bootstrap && sudo cp ninja /usr/bin)
   - (git clone --depth 1 -b 0.51.1 https://github.com/mesonbuild/meson.git; cd meson; sudo python3.5 ./setup.py install)
   - (git clone --depth 1 https://github.com/sstephenson/bats.git; cd bats; sudo ./install.sh /usr/local)
   - ($GO get github.com/containers/storage; cd $GOPATH/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := exclude_graphdriver_devicemapper exclude_graphdriver_btrfs|' Makefile; make GO=$GO containers-storage)
