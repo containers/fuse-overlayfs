@@ -4952,7 +4952,8 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "-V") == 0)
     return 1;
-  if (strcmp (arg, "--debug") == 0)
+  if ((strcmp (arg, "--debug") == 0) || (strcmp (arg, "-d") == 0) ||
+      (strcmp (arg, "debug") == 0))
     {
       ovl_data->debug = 1;
       return 1;
