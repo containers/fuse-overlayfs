@@ -4182,7 +4182,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
               return;
             }
 
-          if (hide_node (lo, destnode, false) < 0)
+          if (hide_node (lo, destnode, true) < 0)
             goto error;
         }
     }
