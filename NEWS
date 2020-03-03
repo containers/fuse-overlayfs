@@ -1,3 +1,9 @@
+* fuse-overlayfs-0.7.7
+
+- make sure the destination is deleted before doing a rename(2).  It prevents a left
+  over directory to cause delete to fail with EEXIST.
+- honor --debug.
+
 * fuse-overlayfs-0.7.6
 
 - do not look in lower layers for the ino if there is no origin xattr set.
