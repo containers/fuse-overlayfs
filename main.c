@@ -2418,6 +2418,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
                   struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
 {
   int ret;
+  int saved_errno;
   cleanup_close int dfd = -1;
   cleanup_free char *buf = NULL;
   char wd_tmp_file_name[32];
@@ -2511,8 +2512,10 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
       ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
     }
 out:
+  saved_errno = errno;
   if (ret < 0)
       unlinkat (lo->workdir_fd, wd_tmp_file_name, AT_REMOVEDIR);
+  errno = saved_errno;
 
   return ret;
 }
