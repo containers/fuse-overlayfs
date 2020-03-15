@@ -701,18 +701,23 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
-  if (ret == 0 && node_dirp (node) && node->ino->nlinks <= 0)
+  if (ret == 0 && node_dirp (node))
     {
-      struct ovl_node *it;
-
-      st->st_nlink = 2;
-
-      for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+      if (node->ino->nlinks <= 0)
         {
-          if (node_dirp (it))
-            st->st_nlink++;
+          struct ovl_node *it;
+
+          st->st_nlink = 2;
+
+          for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+            {
+              if (node_dirp (it))
+                st->st_nlink++;
+            }
+          node->ino->nlinks = st->st_nlink;
         }
-      node->ino->nlinks = st->st_nlink;
+      else
+        st->st_nlink = node->ino->nlinks;
     }
 
   return ret;
