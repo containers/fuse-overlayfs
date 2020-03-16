@@ -1259,7 +1259,8 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
                     }
                   ret->last_layer = it;
                 }
-                goto no_fd;
+              has_origin = false;
+              goto no_fd;
             }
 
           /* It is an open FD, stat the file and read the origin xattrs.  */
@@ -1276,7 +1277,10 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
             }
 
           if (stat_only)
-            goto no_fd;
+            {
+              has_origin = false;
+              goto no_fd;
+            }
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
           if (s > 0)
