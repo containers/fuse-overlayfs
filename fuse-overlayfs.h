@@ -33,7 +33,6 @@ struct ovl_ino
   dev_t dev;
   int lookups;
   mode_t mode;
-  int nlinks;
 };
 
 struct ovl_node

@@ -145,3 +145,27 @@ test -e merged/a/test
 ls -l merged/b
 
 test -e merged/b/test
+
+#### Correct number of directory nlink
+
+umount merged
+
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+mkdir lower/a lower/a/1 lower/a/2 lower/a/3
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+test $(stat -c %h merged/a) = 5
+
+mkdir merged/a/4
+
+test $(stat -c %h merged/a) = 6
+
+rm -rf merged/a/4
+
+test $(stat -c %h merged/a) = 5
+
+rm -rf merged/a/3
+
+test $(stat -c %h merged/a) = 4
