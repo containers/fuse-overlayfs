@@ -690,8 +690,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
     ret = stat (path, st);
   else if (node->hidden)
     ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
-    else
-      ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
+  else
+    ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
 
   if (ret < 0)
     return ret;
@@ -701,7 +701,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
-  if (ret == 0 && node_dirp (node) && node->ino->nlinks <= 0)
+  if (ret == 0 && node_dirp (node))
     {
       struct ovl_node *it;
 
@@ -712,7 +712,6 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
           if (node_dirp (it))
             st->st_nlink++;
         }
-      node->ino->nlinks = st->st_nlink;
     }
 
   return ret;
@@ -1351,19 +1350,13 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
     {
       if (hash_lookup (prev_parent->children, item) == item)
         hash_delete (prev_parent->children, item);
-      if (is_dir)
-        prev_parent->ino->nlinks--;
     }
 
   if (replace)
     {
       old = hash_delete (parent->children, item);
       if (old)
-        {
-          if (node_dirp (old))
-            parent->ino->nlinks--;
-          node_free (old);
-        }
+        node_free (old);
     }
 
   ret = hash_insert_if_absent (parent->children, item, (const void **) &old);
@@ -1380,8 +1373,6 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
     }
 
   item->parent = parent;
-  if (is_dir)
-    parent->ino->nlinks++;
 
   return item;
 }
