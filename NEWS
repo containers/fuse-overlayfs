@@ -1,3 +1,8 @@
+* fuse-overlayfs-0.7.8
+
+- report correctly the number of links for a directory also for subsequent stat calls.
+- stop looking up the ino in the lower layers if the file could not be opened.
+
 * fuse-overlayfs-0.7.7
 
 - make sure the destination is deleted before doing a rename(2).  It prevents a left
