@@ -1,3 +1,7 @@
+* fuse-overlayfs-1.0.0
+
+- fix portability issue to 32 bits archs.
+
 * fuse-overlayfs-0.7.8
 
 - report correctly the number of links for a directory also for subsequent stat calls.
