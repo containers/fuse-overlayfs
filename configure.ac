@@ -75,8 +75,7 @@ AC_DEFINE_UNQUOTED([HAVE_FUSE_COPY_FILE_RANGE], $fuse_has_copy_file_range, [Defi
 AC_SEARCH_LIBS([dlopen], [dl], [], [AC_MSG_ERROR([unable to find dlopen()])])
 
 AC_FUNC_ERROR_AT_LINE
-AC_FUNC_MALLOC
-AC_CHECK_FUNCS([open_by_handle_at error memset strdup copy_file_range statx])
+AC_CHECK_FUNCS([malloc open_by_handle_at error memset strdup copy_file_range statx])
 
 AC_CONFIG_FILES([Makefile lib/Makefile])
 AC_OUTPUT
