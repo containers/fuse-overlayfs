@@ -4993,6 +4993,8 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     return 1;
   if (strcmp (arg, "max_write") == 0)
     return 1;
+  if (strcmp (arg, "ro") == 0)
+    return 1;
 
   if (key == FUSE_OPT_KEY_NONOPT)
     {
