@@ -494,7 +494,7 @@ set_fd_opaque (int fd)
           return -1;
     }
  create_opq_whiteout:
-  opq_whiteout_fd = TEMP_FAILURE_RETRY (openat (fd, OPAQUE_WHITEOUT, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
+  opq_whiteout_fd = TEMP_FAILURE_RETRY (safe_openat (fd, OPAQUE_WHITEOUT, O_CREAT|O_WRONLY|O_NONBLOCK, 0700));
   return (opq_whiteout_fd >= 0 || ret == 0) ? 0 : -1;
 }
 
@@ -2445,7 +2445,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
-  ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY));
+  ret = dfd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, O_RDONLY, 0));
   if (ret < 0)
     goto out;
 
@@ -2645,11 +2645,11 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
       goto success;
     }
 
-  ret = sfd = node->layer->ds->openat (node->layer, node->path, O_RDONLY|O_NONBLOCK, 0755);
+  ret = sfd = node->layer->ds->openat (node->layer, node->path, O_RDONLY|O_NONBLOCK, 0);
   if (sfd < 0)
     goto exit;
 
-  ret = dfd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode));
+  ret = dfd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode));
   if (dfd < 0)
     goto exit;
 
@@ -2865,7 +2865,7 @@ empty_dirfd (int fd)
             {
               int dfd;
 
-              dfd = openat (dirfd (dp), dent->d_name, O_DIRECTORY);
+              dfd = safe_openat (dirfd (dp), dent->d_name, O_DIRECTORY, 0);
               if (dfd < 0)
                 return -1;
 
@@ -2893,7 +2893,7 @@ empty_dir (struct ovl_layer *l, const char *path)
   cleanup_close int cleanup_fd = -1;
   int ret;
 
-  cleanup_fd = TEMP_FAILURE_RETRY (openat (l->fd, path, O_DIRECTORY));
+  cleanup_fd = TEMP_FAILURE_RETRY (safe_openat (l->fd, path, O_DIRECTORY, 0));
   if (cleanup_fd < 0)
     return -1;
 
@@ -3171,7 +3171,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   /* try to create directly the file if it doesn't need to be chowned.  */
   if (uid == lo->uid && gid == lo->gid)
     {
-      ret = TEMP_FAILURE_RETRY (openat (get_upper_layer (lo)->fd, path, flags, mode));
+      ret = TEMP_FAILURE_RETRY (safe_openat (get_upper_layer (lo)->fd, path, flags, mode));
       if (ret >= 0)
         return ret;
       /* if it fails (e.g. there is a whiteout) then fallback to create it in
@@ -3180,7 +3180,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  fd = TEMP_FAILURE_RETRY (openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
+  fd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
   if (fd < 0)
     return -1;
   if (uid != lo->uid || gid != lo->gid)
@@ -3590,7 +3590,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       switch (mode & S_IFMT)
         {
         case S_IFREG:
-          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|(to_set & FUSE_SET_ATTR_SIZE ? O_WRONLY : 0)));
+          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (safe_openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|(to_set & FUSE_SET_ATTR_SIZE ? O_WRONLY : 0), 0));
           if (fd < 0)
             {
               fuse_reply_err (req, errno);
@@ -3599,7 +3599,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
           break;
 
         case S_IFDIR:
-          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK));
+          cleaned_up_fd = fd = TEMP_FAILURE_RETRY (safe_openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK, 0));
           if (fd < 0)
             {
               if (errno != ELOOP)
@@ -3611,7 +3611,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
           break;
 
         case S_IFLNK:
-          cleaned_up_fd = TEMP_FAILURE_RETRY (openat (dirfd, node->path, O_PATH|O_NOFOLLOW|O_NONBLOCK));
+          cleaned_up_fd = TEMP_FAILURE_RETRY (safe_openat (dirfd, node->path, O_PATH|O_NOFOLLOW|O_NONBLOCK, 0));
           if (cleaned_up_fd < 0)
             {
               fuse_reply_err (req, errno);
@@ -3981,7 +3981,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (pnode == NULL)
     goto error;
 
-  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (pnode), pnode->path, O_DIRECTORY));
+  ret = TEMP_FAILURE_RETRY (safe_openat (node_dirfd (pnode), pnode->path, O_DIRECTORY, 0));
   if (ret < 0)
     goto error;
   srcfd = ret;
@@ -3990,7 +3990,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (destpnode == NULL)
     goto error;
 
-  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY));
+  ret = TEMP_FAILURE_RETRY (safe_openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY, 0));
   if (ret < 0)
     goto error;
   destfd = ret;
@@ -4106,7 +4106,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (pnode == NULL)
     goto error;
 
-  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (pnode), pnode->path, O_DIRECTORY));
+  ret = TEMP_FAILURE_RETRY (safe_openat (node_dirfd (pnode), pnode->path, O_DIRECTORY, 0));
   if (ret < 0)
     goto error;
   srcfd = ret;
@@ -4115,7 +4115,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (destpnode == NULL)
     goto error;
 
-  ret = TEMP_FAILURE_RETRY (openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY));
+  ret = TEMP_FAILURE_RETRY (safe_openat (node_dirfd (destpnode), destpnode->path, O_DIRECTORY, 0));
   if (ret < 0)
     goto error;
   destfd = ret;
@@ -4622,7 +4622,7 @@ direct_fsync (struct ovl_layer *l, int fd, const char *path, int datasync)
 
   if (fd < 0)
     {
-      cfd = openat (l->fd, path, O_NOFOLLOW|O_DIRECTORY);
+      cfd = safe_openat (l->fd, path, O_NOFOLLOW|O_DIRECTORY, 0);
       if (cfd < 0)
           return cfd;
       fd = cfd;
@@ -4813,7 +4813,7 @@ ovl_fallocate (fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t len
     }
 
   dirfd = node_dirfd (node);
-  fd = openat (dirfd, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0755);
+  fd = safe_openat (dirfd, node->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
@@ -4878,7 +4878,7 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
       return;
     }
 
-  fd_dest = TEMP_FAILURE_RETRY (openat (node_dirfd (dnode), dnode->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY));
+  fd_dest = TEMP_FAILURE_RETRY (safe_openat (node_dirfd (dnode), dnode->path, O_NONBLOCK|O_NOFOLLOW|O_WRONLY, 0));
   if (fd_dest < 0)
     {
       fuse_reply_err (req, errno);

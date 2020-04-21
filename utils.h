@@ -53,4 +53,6 @@ int open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *
 void statx_to_stat (struct statx *stx, struct stat *st);
 # endif
 
+int safe_openat (int dirfd, const char *pathname, int flags, mode_t mode);
+
 #endif

@@ -129,7 +129,7 @@ direct_opendir (struct ovl_layer *l, const char *path)
   cleanup_close int cleanup_fd = -1;
   DIR *dp = NULL;
 
-  cleanup_fd = TEMP_FAILURE_RETRY (openat (l->fd, path, O_DIRECTORY));
+  cleanup_fd = TEMP_FAILURE_RETRY (safe_openat (l->fd, path, O_DIRECTORY, 0));
   if (cleanup_fd < 0)
     return NULL;
 
@@ -151,7 +151,7 @@ direct_closedir (void *dirp)
 static int
 direct_openat (struct ovl_layer *l, const char *path, int flags, mode_t mode)
 {
-  return TEMP_FAILURE_RETRY (openat (l->fd, path, flags, mode));
+  return TEMP_FAILURE_RETRY (safe_openat (l->fd, path, flags, mode));
 }
 
 static ssize_t

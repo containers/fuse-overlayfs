@@ -25,6 +25,10 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/sysmacros.h>
+#include <sys/syscall.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
@@ -34,6 +38,62 @@
        while (__result == -1L && errno == EINTR);                             \
        __result; }))
 #endif
+
+#ifndef RESOLVE_IN_ROOT
+# define RESOLVE_IN_ROOT		0x10
+#endif
+#ifndef __NR_openat2
+# define __NR_openat2 437
+#endif
+
+/* List of all valid flags for the open/openat flags argument: */
+#define VALID_OPEN_FLAGS \
+  (O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | \
+   O_APPEND | O_NDELAY | O_NONBLOCK | O_NDELAY | O_SYNC | O_DSYNC |     \
+   FASYNC | O_DIRECT | O_LARGEFILE | O_DIRECTORY | O_NOFOLLOW |         \
+   O_NOATIME | O_CLOEXEC | O_PATH | O_TMPFILE)
+
+static int
+syscall_openat2 (int dirfd, const char *path, uint64_t flags, uint64_t mode, uint64_t resolve)
+{
+  struct openat2_open_how
+    {
+      uint64_t flags;
+      uint64_t mode;
+      uint64_t resolve;
+    }
+  how =
+    {
+     .flags = flags & VALID_OPEN_FLAGS,
+     .mode = (flags & O_CREAT) ? (mode & 07777) : 0,
+     .resolve = resolve,
+    };
+
+  return (int) syscall (__NR_openat2, dirfd, path, &how, sizeof (how), 0);
+}
+
+int
+safe_openat (int dirfd, const char *pathname, int flags, mode_t mode)
+{
+  static bool openat2_supported = true;
+
+  if (openat2_supported)
+    {
+      int ret;
+
+      ret = syscall_openat2 (dirfd, pathname, flags, mode, RESOLVE_IN_ROOT);
+      if (ret < 0)
+        {
+          if (errno == ENOSYS)
+            openat2_supported = false;
+          if (errno == ENOSYS || errno == EINVAL)
+            goto fallback;
+        }
+      return ret;
+    }
+ fallback:
+  return openat (dirfd, pathname, flags, mode);
+}
 
 int
 file_exists_at (int dirfd, const char *pathname)
@@ -148,7 +208,7 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
 {
   out[0] = '\0';
 
-  *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0755);
+  *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0);
   if (*fd < 0 && (errno == ELOOP || errno == EISDIR || errno == ENXIO))
     {
       strconcat3 (out, PATH_MAX, l->path, "/", path);
