@@ -3646,7 +3646,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
       if (fd >= 0)
         ret = futimens (fd, times);
       else
-        ret = utimensat (AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW);
+        ret = utimensat (AT_FDCWD, path, times, 0);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);

@@ -169,3 +169,22 @@ test $(stat -c %h merged/a) = 5
 rm -rf merged/a/3
 
 test $(stat -c %h merged/a) = 4
+
+# symlink mtime
+
+touch merged/afile
+ln -s afile merged/alink
+touch -h -d "2020-01-02 12:13:14" merged/alink
+stat --format "%y" merged/alink | grep "12:13:14"
+stat --format "%x" merged/alink | grep "12:13:14"
+
+# file mtime
+touch -h -d "2020-01-02 11:12:13" merged/afile
+stat --format "%y" merged/afile | grep "11:12:13"
+stat --format "%x" merged/afile | grep "11:12:13"
+
+# dir mtime
+mkdir merged/adir
+touch -h -d "2020-01-02 10:11:12" merged/adir
+stat --format "%y" merged/adir | grep "10:11:12"
+stat --format "%x" merged/adir | grep "10:11:12"
