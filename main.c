@@ -5015,7 +5015,12 @@ char **
 get_new_args (int *argc, char **argv)
 {
   int i;
-  char **newargv = malloc (sizeof (char *) * (*argc + 2));
+  char **newargv;
+
+  newargv = malloc (sizeof (char *) * (*argc + 2));
+  if (newargv == NULL)
+    error (EXIT_FAILURE, 0, "error allocating memory");
+
   newargv[0] = argv[0];
   if (geteuid() == 0)
     newargv[1] = "-odefault_permissions,allow_other,suid,noatime,lazytime";
