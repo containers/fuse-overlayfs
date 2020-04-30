@@ -2557,12 +2557,14 @@ copy_fd_to_fd (int sfd, int dfd, char *buf, size_t buf_size)
         break;
 
       written = 0;
-      {
-        ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
-        if (ret < 0)
-          return ret;
-        nread -= ret;
-      }
+      do
+        {
+          ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
+          if (ret < 0)
+            return ret;
+          nread -= ret;
+          written += ret;
+        }
       while (nread);
     }
   return 0;
