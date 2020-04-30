@@ -1,5 +1,7 @@
 #!/bin/sh
 
+rm -rf lower upper workdir merged
+
 mkdir lower upper workdir merged
 
 touch lower/a
