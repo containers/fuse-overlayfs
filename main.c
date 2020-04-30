@@ -1097,19 +1097,13 @@ make_whiteout_node (const char *path, const char *name)
 
   new_name = strdup (name);
   if (new_name == NULL)
-    {
-      free (ret);
-      return NULL;
-    }
+    return NULL;
+
   node_set_name (ret, new_name);
 
   ret->path = strdup (path);
   if (ret->path == NULL)
-    {
-      free (new_name);
-      free (ret);
-      return NULL;
-    }
+    return NULL;
 
   ret->whiteout = 1;
   ret->ino = &dummy_ino;
