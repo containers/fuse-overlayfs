@@ -1219,7 +1219,6 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          bool stat_only = false;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
@@ -1267,12 +1266,6 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
                     mode = st.st_mode;
                 }
               ret->last_layer = it;
-            }
-
-          if (stat_only)
-            {
-              has_origin = false;
-              goto no_fd;
             }
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
