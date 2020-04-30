@@ -1760,7 +1760,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           char whpath[PATH_MAX];
           const char *wh_name;
 
-          if (pnode && pnode->last_layer == it)
+          if (pnode->last_layer == it)
             stop_lookup = true;
 
           strconcat3 (path, PATH_MAX, pnode->path, "/", name);
