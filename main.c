@@ -1097,19 +1097,13 @@ make_whiteout_node (const char *path, const char *name)
 
   new_name = strdup (name);
   if (new_name == NULL)
-    {
-      free (ret);
-      return NULL;
-    }
+    return NULL;
+
   node_set_name (ret, new_name);
 
   ret->path = strdup (path);
   if (ret->path == NULL)
-    {
-      free (new_name);
-      free (ret);
-      return NULL;
-    }
+    return NULL;
 
   ret->whiteout = 1;
   ret->ino = &dummy_ino;
@@ -1225,7 +1219,6 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       for (it = layer; it; it = it->next)
         {
           ssize_t s;
-          bool stat_only = false;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
@@ -1273,12 +1266,6 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
                     mode = st.st_mode;
                 }
               ret->last_layer = it;
-            }
-
-          if (stat_only)
-            {
-              has_origin = false;
-              goto no_fd;
             }
 
           s = safe_read_xattr (&val, fd, PRIVILEGED_ORIGIN_XATTR, PATH_MAX);
@@ -1766,7 +1753,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
           char whpath[PATH_MAX];
           const char *wh_name;
 
-          if (pnode && pnode->last_layer == it)
+          if (pnode->last_layer == it)
             stop_lookup = true;
 
           strconcat3 (path, PATH_MAX, pnode->path, "/", name);
@@ -2570,12 +2557,14 @@ copy_fd_to_fd (int sfd, int dfd, char *buf, size_t buf_size)
         break;
 
       written = 0;
-      {
-        ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
-        if (ret < 0)
-          return ret;
-        nread -= ret;
-      }
+      do
+        {
+          ret = TEMP_FAILURE_RETRY (write (dfd, buf + written, nread));
+          if (ret < 0)
+            return ret;
+          nread -= ret;
+          written += ret;
+        }
       while (nread);
     }
   return 0;
@@ -4707,7 +4696,7 @@ direct_ioctl (struct ovl_layer *l, int fd, int cmd, unsigned long *r)
 }
 
 static void
-ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
+ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
            struct fuse_file_info *fi, unsigned int flags,
            const void *in_buf, size_t in_bufsz, size_t out_bufsz)
 {
