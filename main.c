@@ -2704,7 +2704,8 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (ret < 0)
     goto exit;
 
-  if (set_fd_origin (dfd, node->path) < 0)
+  ret = set_fd_origin (dfd, node->path);
+  if (ret < 0)
     goto exit;
 
   /* Finally, move the file to its destination.  */
