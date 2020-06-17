@@ -823,7 +823,7 @@ drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 }
 
 static int
-direct_renameat2 (struct ovl_layer *l, int olddirfd, const char *oldpath,
+direct_renameat2 (int olddirfd, const char *oldpath,
                   int newdirfd, const char *newpath, unsigned int flags)
 {
   return syscall (SYS_renameat2, olddirfd, oldpath, newdirfd, newpath, flags);
@@ -2393,6 +2393,67 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
   return 0;
 }
 
+static int
+empty_dirfd (int fd)
+{
+  cleanup_dir DIR *dp = NULL;
+  struct dirent *dent;
+
+  dp = fdopendir (fd);
+  if (dp == NULL)
+    {
+      close (fd);
+      return -1;
+    }
+
+  for (;;)
+    {
+      int ret;
+
+      errno = 0;
+      dent = readdir (dp);
+      if (dent == NULL)
+        {
+          if (errno)
+            return -1;
+
+          break;
+        }
+      if (strcmp (dent->d_name, ".") == 0)
+        continue;
+      if (strcmp (dent->d_name, "..") == 0)
+        continue;
+
+      ret = unlinkat (dirfd (dp), dent->d_name, 0);
+      if (ret < 0 && errno == EISDIR)
+        {
+          ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+          if (ret < 0 && errno == ENOTEMPTY)
+            {
+              int dfd;
+
+              dfd = safe_openat (dirfd (dp), dent->d_name, O_DIRECTORY, 0);
+              if (dfd < 0)
+                return -1;
+
+              ret = empty_dirfd (dfd);
+              if (ret < 0)
+                return -1;
+
+              ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
+              if (ret < 0)
+                return -1;
+
+              continue;
+            }
+        }
+      if (ret < 0)
+        return ret;
+    }
+
+  return 0;
+}
+
 static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 
 static int
@@ -2482,6 +2543,24 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
   if (ret < 0)
     {
+      if (errno == EEXIST)
+        {
+          int dfd = -1;
+
+          ret = direct_renameat2 (lo->workdir_fd, wd_tmp_file_name, dirfd, name, RENAME_EXCHANGE);
+          if (ret < 0)
+            goto out;
+
+          dfd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, O_DIRECTORY, 0));
+          if (dfd < 0)
+            return -1;
+
+          ret = empty_dirfd (dfd);
+          if (ret < 0)
+            goto out;
+
+          return unlinkat (lo->workdir_fd, wd_tmp_file_name, AT_REMOVEDIR);
+        }
       if (errno == ENOTDIR)
         unlinkat (dirfd, name, 0);
       if (errno == ENOENT && parent)
@@ -2811,67 +2890,6 @@ update_paths (struct ovl_node *node)
           if (update_paths (it) < 0)
             return -1;
         }
-    }
-
-  return 0;
-}
-
-static int
-empty_dirfd (int fd)
-{
-  cleanup_dir DIR *dp = NULL;
-  struct dirent *dent;
-
-  dp = fdopendir (fd);
-  if (dp == NULL)
-    {
-      close (fd);
-      return -1;
-    }
-
-  for (;;)
-    {
-      int ret;
-
-      errno = 0;
-      dent = readdir (dp);
-      if (dent == NULL)
-        {
-          if (errno)
-            return -1;
-
-          break;
-        }
-      if (strcmp (dent->d_name, ".") == 0)
-        continue;
-      if (strcmp (dent->d_name, "..") == 0)
-        continue;
-
-      ret = unlinkat (dirfd (dp), dent->d_name, 0);
-      if (ret < 0 && errno == EISDIR)
-        {
-          ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
-          if (ret < 0 && errno == ENOTEMPTY)
-            {
-              int dfd;
-
-              dfd = safe_openat (dirfd (dp), dent->d_name, O_DIRECTORY, 0);
-              if (dfd < 0)
-                return -1;
-
-              ret = empty_dirfd (dfd);
-              if (ret < 0)
-                return -1;
-
-              ret = unlinkat (dirfd (dp), dent->d_name, AT_REMOVEDIR);
-              if (ret < 0)
-                return -1;
-
-              continue;
-            }
-        }
-      if (ret < 0)
-        return ret;
     }
 
   return 0;
@@ -4006,7 +4024,7 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
     goto error;
 
 
-  ret = direct_renameat2 (node->layer, srcfd, name, destfd, newname, flags);
+  ret = direct_renameat2 (srcfd, name, destfd, newname, flags);
   if (ret < 0)
     goto error;
 
@@ -4179,7 +4197,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
    so that with one operation we get both the rename and the whiteout created.  */
   if (destnode_is_whiteout)
     {
-      ret = direct_renameat2 (get_upper_layer (lo), srcfd, name, destfd, newname, flags|RENAME_EXCHANGE);
+      ret = direct_renameat2 (srcfd, name, destfd, newname, flags|RENAME_EXCHANGE);
       if (ret == 0)
         goto done;
 
@@ -4199,11 +4217,11 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   /* Try to create the whiteout atomically, if it fails do the
      rename+mknod separately.  */
-  ret = direct_renameat2 (get_upper_layer (lo), srcfd, name, destfd,
+  ret = direct_renameat2 (srcfd, name, destfd,
                           newname, flags|RENAME_WHITEOUT);
   if (ret < 0)
     {
-      ret = direct_renameat2 (get_upper_layer (lo), srcfd, name, destfd,
+      ret = direct_renameat2 (srcfd, name, destfd,
                               newname, flags);
       if (ret < 0)
         goto error;
