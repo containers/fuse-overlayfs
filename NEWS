@@ -1,3 +1,12 @@
+* fuse-overlayfs-1.1.0
+
+- use openat(2) when available.
+- accept "ro" as mount option.
+- fix set mtime for a symlink.
+- fix some issues reported by static analysis.
+- fix potential infinite loop on a short read.
+- fix creating a directory if the destination already exists in the upper layer.
+
 * fuse-overlayfs-1.0.0
 
 - fix portability issue to 32 bits archs.
