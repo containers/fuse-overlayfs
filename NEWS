@@ -1,6 +1,6 @@
 * fuse-overlayfs-1.1.0
 
-- use openat(2) when available.
+- use openat2(2) when available.
 - accept "ro" as mount option.
 - fix set mtime for a symlink.
 - fix some issues reported by static analysis.
