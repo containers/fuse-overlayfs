@@ -1,0 +1,16 @@
+FROM --platform=$BUILDPLATFORM debian:10 AS fuse-overlayfs
+RUN apt-get update && \
+  apt-get install --no-install-recommends -y \
+  git ca-certificates libc6-dev gcc make automake autoconf pkgconf libfuse3-dev file curl
+RUN curl -o /cross.sh https://raw.githubusercontent.com/tonistiigi/binfmt/18c3d40ae2e3485e4de5b453e8460d6872b24d6b/binfmt/scripts/cross.sh && chmod +x /cross.sh
+COPY . /fuse-overlayfs
+WORKDIR /fuse-overlayfs
+ARG TARGETPLATFORM
+RUN /cross.sh install gcc pkgconf libfuse3-dev | sh
+RUN ./autogen.sh && \
+  CC=$(/cross.sh cross-prefix)-gcc LD=$(/cross.sh cross-prefix)-ld LIBS="-ldl" LDFLAGS="-static" ./configure && \
+  make && mkdir /out && cp fuse-overlayfs /out && \
+  file /out/fuse-overlayfs | grep "statically linked"
+
+FROM scratch
+COPY --from=fuse-overlayfs /out/fuse-overlayfs /fuse-overlayfs
