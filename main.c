@@ -666,7 +666,7 @@ find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool ui
 static uid_t
 get_uid (struct ovl_data *data, uid_t id)
 {
-  return find_mapping (id, data->uid_mappings, false, false);
+  return find_mapping (id, data->uid_mappings, false, true);
 }
 
 static uid_t
