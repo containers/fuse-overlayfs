@@ -666,7 +666,7 @@ find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool ui
 static uid_t
 get_uid (struct ovl_data *data, uid_t id)
 {
-  return find_mapping (id, data->uid_mappings, false, false);
+  return find_mapping (id, data->uid_mappings, false, true);
 }
 
 static uid_t
@@ -5232,12 +5232,16 @@ main (int argc, char *argv[])
       mkdir (path, 0700);
       free (lo.workdir);
       lo.workdir = strdup (path);
+      if (lo.workdir == NULL)
+        error (EXIT_FAILURE, errno, "allocating workdir path");
 
       lo.workdir_fd = open (lo.workdir, O_DIRECTORY);
       if (lo.workdir_fd < 0)
         error (EXIT_FAILURE, errno, "cannot open workdir");
 
       dfd = dup (lo.workdir_fd);
+      if (dfd < 0)
+        error (EXIT_FAILURE, errno, "dup workdir file descriptor");
       empty_dirfd (dfd);
     }
 
