@@ -46,6 +46,11 @@
 # define __NR_openat2 437
 #endif
 
+/* uClibc and uClibc-ng don't provide O_TMPFILE */
+#ifndef O_TMPFILE
+# define O_TMPFILE (020000000 | O_DIRECTORY)
+#endif
+
 /* List of all valid flags for the open/openat flags argument: */
 #define VALID_OPEN_FLAGS \
   (O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | \
