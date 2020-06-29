@@ -1,3 +1,8 @@
+* fuse-overlayfs-1.1.2
+
+- fix build issues with libmusl.
+- fix memory leak when creating whiteout files.
+
 * fuse-overlayfs-1.1.1
 
 - fix lookup for overflow uid when it is different than the overflow gid.
