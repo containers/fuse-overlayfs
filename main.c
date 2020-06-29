@@ -166,6 +166,8 @@ static bool disable_ovl_whiteout;
 static uid_t overflow_uid;
 static gid_t overflow_gid;
 
+static struct ovl_ino dummy_ino;
+
 static double
 get_timeout (struct ovl_data *lo)
 {
@@ -747,7 +749,7 @@ node_free (void *p)
       n->parent = NULL;
     }
 
-  if (n->ino || n->node_lookups > 0)
+  if ((n->ino && n->ino != &dummy_ino) || n->node_lookups > 0)
     return;
 
   if (n->children)
@@ -1081,8 +1083,6 @@ node_set_name (struct ovl_node *node, char *name)
   else
     node->name_hash = hash_string (name, SIZE_MAX);
 }
-
-static struct ovl_ino dummy_ino;
 
 static struct ovl_node *
 make_whiteout_node (const char *path, const char *name)
