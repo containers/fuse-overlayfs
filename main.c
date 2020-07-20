@@ -5151,6 +5151,9 @@ main (int argc, char *argv[])
   if (lo.redirect_dir && strcmp (lo.redirect_dir, "off"))
     error (EXIT_FAILURE, 0, "fuse-overlayfs only supports redirect_dir=off");
 
+  if (lo.mountpoint == NULL)
+    error (EXIT_FAILURE, 0, "no mountpoint specified");
+
   if (lo.upperdir != NULL)
     {
       cleanup_free char *full_path = NULL;
