@@ -112,6 +112,8 @@ struct ovl_layer
   bool low;
 
   void *data_source_private_data;
+  unsigned int has_stat_override : 1;
+  unsigned int has_privileged_stat_override : 1;
 };
 
 /* a data_source defines the methods for accessing a lower layer.  */
