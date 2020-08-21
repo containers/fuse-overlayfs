@@ -90,7 +90,7 @@ direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, 
   if (ret == 0)
     {
       statx_to_stat (&stx, st);
-      return override_mode (l, fd, path, st);
+      return override_mode (l, fd, NULL, path, st);
     }
 
   return ret;
@@ -101,7 +101,7 @@ direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, 
   if (ret != 0)
     return ret;
 
-  return override_mode (l, fd, path, st);
+  return override_mode (l, fd, NULL, path, st);
 }
 
 static int
@@ -118,7 +118,7 @@ direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags
   if (ret == 0)
     {
       statx_to_stat (&stx, st);
-      return override_mode (l, -1, path, st);
+      return override_mode (l, -1, NULL, path, st);
     }
 
   return ret;
@@ -128,7 +128,7 @@ direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags
   if (ret != 0)
     return ret;
 
-  return override_mode (l, -1, path, st);
+  return override_mode (l, -1, NULL, path, st);
 }
 
 static struct dirent *

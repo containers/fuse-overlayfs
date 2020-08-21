@@ -58,6 +58,6 @@ void statx_to_stat (struct statx *stx, struct stat *st);
 
 int safe_openat (int dirfd, const char *pathname, int flags, mode_t mode);
 
-int override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st);
+int override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st);
 
 #endif

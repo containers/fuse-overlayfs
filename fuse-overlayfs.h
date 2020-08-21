@@ -94,6 +94,7 @@ struct ovl_data
   int fast_ino_check;
   int writeback;
   int disable_xattrs;
+  int xattr_permissions;
 
   /* current uid/gid*/
   uid_t uid;

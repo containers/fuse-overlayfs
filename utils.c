@@ -225,7 +225,7 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
 }
 
 int
-override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st)
+override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st)
 {
   int ret;
   uid_t uid;
@@ -246,6 +246,12 @@ override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st)
       if (ret < 0)
         return ret;
     }
+  else if (abs_path)
+    {
+      ret = lgetxattr (abs_path, xattr_name, buf, sizeof (buf) - 1);
+      if (ret < 0)
+        return ret;
+    }
   else
     {
       char full_path[PATH_MAX];
@@ -259,7 +265,11 @@ override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st)
       if (fd >= 0)
         ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
       else
+        {
           ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
+          if (ret < 0 && errno == ENODATA)
+            return 0;
+        }
 
       if (ret < 0)
         return ret;

@@ -203,6 +203,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, disable_xattrs), 1},
   {"plugins=%s",
    offsetof (struct ovl_data, plugins), 0},
+  {"xattr_permissions=%d",
+   offsetof (struct ovl_data, xattr_permissions), 0},
   FUSE_OPT_END
 };
 
@@ -464,10 +466,54 @@ can_access_xattr (const char *name)
     && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
 }
 
+static ssize_t
+write_permission_xattr (struct ovl_data *lo, int fd, const char *path, uid_t uid, gid_t gid, mode_t mode)
+{
+  char buf[64];
+  size_t len;
+  int ret;
+  const char *name = NULL;
+
+  switch (lo->xattr_permissions)
+    {
+    case 0:
+      return 0;
+
+    case 1:
+    name = XATTR_PRIVILEGED_OVERRIDE_STAT;
+    break;
+
+    case 2:
+      name = XATTR_OVERRIDE_STAT;
+      break;
+
+    default:
+      errno = EINVAL;
+      return -1;
+    }
+
+  if (path == NULL && fd < 0)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
+  len = sprintf (buf, "%d:%d:%o", uid, gid, mode);
+  if (fd >= 0)
+    return fsetxattr (fd, name, buf, len, 0);
+
+  ret = lsetxattr (path, name, buf, len, 0);
+  /* Ignore EPERM in unprivileged mode.  */
+  if (ret < 0 && lo->xattr_permissions == 2 && errno == EPERM)
+    return 0;
+  return ret;
+}
 
 static int
 do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
 {
+  if (lo->xattr_permissions)
+    return write_permission_xattr (lo, fd, NULL, uid, gid, mode);
   return fchown (fd, uid, gid);
 }
 /* Make sure it is not used anymore.  */
@@ -476,6 +522,8 @@ do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
 static int
 do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mode)
 {
+  if (lo->xattr_permissions)
+    return write_permission_xattr (lo, -1, path, uid, gid, mode);
   return chown (path, uid, gid);
 }
 /* Make sure it is not used anymore.  */
@@ -484,6 +532,16 @@ do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mo
 static int
 do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gid, mode_t mode, int flags)
 {
+  if (lo->xattr_permissions)
+    {
+      char proc_path[32];
+      cleanup_close int fd = openat (dfd, path, O_NOFOLLOW|O_PATH);
+      if (fd < 0)
+        return fd;
+
+      sprintf (proc_path, "/proc/self/fd/%d", fd);
+      return write_permission_xattr (lo, -1, proc_path, uid, gid, mode);
+    }
   return fchownat (dfd, path, uid, gid, 0);
 }
 /* Make sure it is not used anymore.  */
@@ -492,6 +550,24 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
 static int
 do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
 {
+  if (lo->xattr_permissions)
+    {
+      struct ovl_layer *upper = get_upper_layer (lo);
+      struct stat st;
+
+      if (upper == NULL)
+        {
+          errno = EROFS;
+          return -1;
+        }
+
+      st.st_uid = 0;
+      st.st_gid = 0;
+      if (override_mode (upper, fd, NULL, NULL, &st) < 0 && errno != ENODATA)
+        return -1;
+
+      return write_permission_xattr (lo, fd, NULL, st.st_uid, st.st_gid, mode);
+    }
   return fchmod (fd, mode);
 }
 /* Make sure it is not used anymore.  */
@@ -500,6 +576,24 @@ do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
 static int
 do_chmod (struct ovl_data *lo, const char *path, mode_t mode)
 {
+  if (lo->xattr_permissions)
+    {
+      struct ovl_layer *upper = get_upper_layer (lo);
+      struct stat st;
+
+      if (upper == NULL)
+        {
+          errno = EROFS;
+          return -1;
+        }
+
+      st.st_uid = 0;
+      st.st_gid = 0;
+      if (override_mode (upper, -1, path, NULL, &st) < 0 && errno != ENODATA)
+        return -1;
+
+      return write_permission_xattr (lo, -1, path, st.st_uid, st.st_gid, mode);
+    }
   return chmod (path, mode);
 }
 /* Make sure it is not used anymore.  */
@@ -2540,7 +2634,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
-  if (uid != lo->uid || gid != lo->gid)
+  if (uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->has_stat_override || get_upper_layer (lo)->has_privileged_stat_override)
     {
       ret = do_fchown (lo, dfd, uid, gid, mode);
       if (ret < 0)
@@ -2764,7 +2858,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (dfd < 0)
     goto exit;
 
-  if (st.st_uid != lo->uid || st.st_gid != lo->gid)
+  if (st.st_uid != lo->uid || st.st_gid != lo->gid || get_upper_layer (lo)->has_stat_override || get_upper_layer (lo)->has_privileged_stat_override)
     {
       ret = do_fchown (lo, dfd, st.st_uid, st.st_gid, st.st_mode);
       if (ret < 0)
@@ -3220,7 +3314,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   int ret;
 
   /* try to create directly the file if it doesn't need to be chowned.  */
-  if (uid == lo->uid && gid == lo->gid)
+  if (uid == lo->uid && gid == lo->gid && !l->has_stat_override && !l->has_privileged_stat_override)
     {
       ret = TEMP_FAILURE_RETRY (safe_openat (get_upper_layer (lo)->fd, path, flags, mode));
       if (ret >= 0)
@@ -3234,7 +3328,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   fd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
   if (fd < 0)
     return -1;
-  if (uid != lo->uid || gid != lo->gid)
+  if (uid != lo->uid || gid != lo->gid || l->has_stat_override || l->has_privileged_stat_override)
     {
       if (do_fchown (lo, fd, uid, gid, mode) < 0)
         {
@@ -3877,7 +3971,7 @@ direct_symlinkat (struct ovl_layer *l, const char *target, const char *linkpath,
   if (ret < 0)
     return ret;
 
-  if (uid != lo->uid || gid != lo->gid)
+  if (uid != lo->uid || gid != lo->gid || l->has_stat_override || l->has_privileged_stat_override)
     {
       ret = do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, uid, gid, AT_SYMLINK_NOFOLLOW, 0755);
       if (ret < 0)
@@ -5146,6 +5240,7 @@ main (int argc, char *argv[])
                         .redirect_dir = NULL,
                         .mountpoint = NULL,
                         .fsync = 1,
+                        .xattr_permissions = 0,
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
                         .writeback = 1,
@@ -5255,7 +5350,50 @@ main (int argc, char *argv[])
         error (EXIT_FAILURE, errno, "cannot read upper dir");
       layers = tmp_layer;
     }
+
   lo.layers = layers;
+
+  if (lo.upperdir)
+    {
+      if (lo.xattr_permissions)
+        {
+          const char *name = NULL;
+          char data[64];
+          ssize_t s;
+          if (lo.xattr_permissions == 1)
+            {
+              get_upper_layer (&lo)->has_privileged_stat_override = 1;
+              name = XATTR_PRIVILEGED_OVERRIDE_STAT;
+            }
+          else if (lo.xattr_permissions == 2)
+            {
+              get_upper_layer (&lo)->has_stat_override = 1;
+              name = XATTR_OVERRIDE_STAT;
+            }
+          else
+            error (EXIT_FAILURE, 0, "invalid value for xattr_permissions");
+
+          s = fgetxattr (get_upper_layer (&lo)->fd, name, data, sizeof (data));
+          if (s < 0)
+            {
+              if (errno != ENODATA)
+                error (EXIT_FAILURE, errno, "read xattr `%s` from upperdir", name);
+              else
+                {
+                  struct stat st;
+                  ret = fstat (get_upper_layer (&lo)->fd, &st);
+                  if (ret < 0)
+                    error (EXIT_FAILURE, errno, "stat upperdir");
+
+                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd,
+                                                lo.upperdir,
+                                                st.st_uid, st.st_gid, st.st_mode);
+                  if (ret < 0)
+                    error (EXIT_FAILURE, errno, "write xattr `%s` to upperdir", name);
+                }
+            }
+        }
+    }
 
   lo.inodes = hash_initialize (2048, NULL, node_inode_hasher, node_inode_compare, inode_free);
 
