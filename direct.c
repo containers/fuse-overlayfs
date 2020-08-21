@@ -274,6 +274,12 @@ direct_num_of_layers (const char *opaque, const char *path)
   return 1;
 }
 
+static bool
+direct_must_be_remapped (struct ovl_layer *l)
+{
+  return l->has_privileged_stat_override == 0 && l->has_stat_override == 0;
+}
+
 struct data_source direct_access_ds =
   {
    .num_of_layers = direct_num_of_layers,
@@ -289,4 +295,5 @@ struct data_source direct_access_ds =
    .getxattr = direct_getxattr,
    .listxattr = direct_listxattr,
    .readlinkat = direct_readlinkat,
+   .must_be_remapped = direct_must_be_remapped,
   };

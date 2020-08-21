@@ -132,6 +132,7 @@ struct data_source
   int (*listxattr)(struct ovl_layer *l, const char *path, char *buf, size_t size);
   int (*getxattr)(struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size);
   ssize_t (*readlinkat)(struct ovl_layer *l, const char *path, char *buf, size_t bufsiz);
+  bool (*must_be_remapped)(struct ovl_layer *l);
 };
 
 /* passtrough to the file system.  */

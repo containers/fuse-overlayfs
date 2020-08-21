@@ -698,8 +698,11 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
   if (ret < 0)
     return ret;
 
-  st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
-  st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
+  if (l->ds->must_be_remapped && l->ds->must_be_remapped (l))
+    {
+      st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
+      st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
+    }
 
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
