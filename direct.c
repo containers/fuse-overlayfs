@@ -34,9 +34,6 @@
 
 #include "utils.h"
 
-#define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
-#define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
-
 static int
 direct_file_exists (struct ovl_layer *l, const char *pathname)
 {
@@ -78,64 +75,6 @@ direct_getxattr (struct ovl_layer *l, const char *path, const char *name, char *
 
   return lgetxattr (full_path, name, buf, size);
 }
-
-static int
-override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st)
-{
-  int ret;
-  uid_t uid;
-  gid_t gid;
-  mode_t mode;
-  char buf[64];
-  cleanup_close int cleanup_fd = -1;
-  const char *xattr_name;
-
-  if (l->has_stat_override == 0 && l->has_privileged_stat_override == 0)
-    return 0;
-
-  xattr_name = l->has_privileged_stat_override ? XATTR_PRIVILEGED_OVERRIDE_STAT : XATTR_OVERRIDE_STAT;
-
-  if (fd >= 0)
-    {
-      ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
-      if (ret < 0)
-        return ret;
-    }
-  else
-    {
-      char full_path[PATH_MAX];
-
-      full_path[0] = '\0';
-      ret = open_fd_or_get_path (l, path, full_path, &cleanup_fd, O_RDONLY);
-      if (ret < 0)
-        return ret;
-      fd = cleanup_fd;
-
-      if (fd >= 0)
-        ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
-      else
-          ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
-
-      if (ret < 0)
-        return ret;
-    }
-
-  buf[ret] = '\0';
-
-  ret = sscanf (buf, "%d:%d:%o", &uid, &gid, &mode);
-  if (ret != 3)
-    {
-      errno = EINVAL;
-      return -1;
-    }
-
-  st->st_uid = uid;
-  st->st_gid = gid;
-  st->st_mode = (st->st_mode & S_IFMT) | mode;
-
-  return 0;
-}
-
 
 static int
 direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, struct stat *st)
