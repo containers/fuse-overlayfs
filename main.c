@@ -275,7 +275,6 @@ check_can_mknod (struct ovl_data *lo)
     can_mknod = false;
 }
 
-
 static struct ovl_mapping *
 read_mappings (const char *str)
 {
@@ -464,6 +463,47 @@ can_access_xattr (const char *name)
   return !has_prefix (name, XATTR_PREFIX)               \
     && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
 }
+
+
+static int
+do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
+{
+  return fchown (fd, uid, gid);
+}
+/* Make sure it is not used anymore.  */
+#define fchown ERROR
+
+static int
+do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mode)
+{
+  return chown (path, uid, gid);
+}
+/* Make sure it is not used anymore.  */
+#define chown ERROR
+
+static int
+do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gid, mode_t mode, int flags)
+{
+  return fchownat (dfd, path, uid, gid, 0);
+}
+/* Make sure it is not used anymore.  */
+#define fchownat ERROR
+
+static int
+do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
+{
+  return fchmod (fd, mode);
+}
+/* Make sure it is not used anymore.  */
+#define fchmod ERROR
+
+static int
+do_chmod (struct ovl_data *lo, const char *path, mode_t mode)
+{
+  return chmod (path, mode);
+}
+/* Make sure it is not used anymore.  */
+#define chmod ERROR
 
 static int
 set_fd_origin (int fd, const char *origin)
@@ -2502,7 +2542,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
 
   if (uid != lo->uid || gid != lo->gid)
     {
-      ret = fchown (dfd, uid, gid);
+      ret = do_fchown (lo, dfd, uid, gid, mode);
       if (ret < 0)
         goto out;
     }
@@ -2726,7 +2766,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
   if (st.st_uid != lo->uid || st.st_gid != lo->gid)
     {
-      ret = fchown (dfd, st.st_uid, st.st_gid);
+      ret = do_fchown (lo, dfd, st.st_uid, st.st_gid, st.st_mode);
       if (ret < 0)
         goto exit;
     }
@@ -3196,7 +3236,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
     return -1;
   if (uid != lo->uid || gid != lo->gid)
     {
-      if (fchown (fd, uid, gid) < 0)
+      if (do_fchown (lo, fd, uid, gid, mode) < 0)
         {
           unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
           return -1;
@@ -3403,7 +3443,7 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
   /* if it is a writepage request, make sure to restore the setuid bit.  */
   if (fi->writepage && (inode->mode & (S_ISUID|S_ISGID)))
     {
-      if (fchmod (fi->fh, inode->mode) < 0)
+      if (do_fchmod (lo, fi->fh, inode->mode) < 0)
         {
           fuse_reply_err (req, errno);
           return;
@@ -3668,9 +3708,9 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   if (to_set & FUSE_SET_ATTR_MODE)
     {
       if (fd >= 0)
-        ret = fchmod (fd, attr->st_mode);
+        ret = do_fchmod (lo, fd, attr->st_mode);
       else
-        ret = chmod (path, attr->st_mode);
+        ret = do_chmod (lo, path, attr->st_mode);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3695,9 +3735,9 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   if (uid != -1 || gid != -1)
     {
       if (fd >= 0)
-        ret = fchown (fd, uid, gid);
+        ret = do_fchown (lo, fd, uid, gid, node->ino->mode);
       else
-        ret = chown (path, uid, gid);
+        ret = do_chown (lo, path, uid, gid, node->ino->mode);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -3839,7 +3879,7 @@ direct_symlinkat (struct ovl_layer *l, const char *target, const char *linkpath,
 
   if (uid != lo->uid || gid != lo->gid)
     {
-      ret = fchownat (lo->workdir_fd, wd_tmp_file_name, uid, gid, AT_SYMLINK_NOFOLLOW);
+      ret = do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, uid, gid, AT_SYMLINK_NOFOLLOW, 0755);
       if (ret < 0)
         {
           unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
@@ -4417,6 +4457,8 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     fprintf (stderr, "ovl_mknod(ino=%" PRIu64 ", name=%s, mode=%d, rdev=%lu)\n",
 	     parent, name, mode, rdev);
 
+  mode = mode & ~ctx->umask;
+
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && !node->whiteout)
     {
@@ -4438,14 +4480,14 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
-  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode & ~ctx->umask, rdev);
+  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode, rdev);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
 
-  if (fchownat (lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), 0) < 0)
+  if (do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), 0, mode) < 0)
     {
       fuse_reply_err (req, errno);
       unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
