@@ -103,7 +103,12 @@ safe_openat (int dirfd, const char *pathname, int flags, mode_t mode)
 int
 file_exists_at (int dirfd, const char *pathname)
 {
-  return faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
+  int ret = faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
+  if (ret < 0 && errno == EINVAL) {
+    struct stat buf;
+    return fstatat (dirfd, pathname, &buf, AT_SYMLINK_NOFOLLOW);
+  }
+  return ret;
 }
 
 #ifdef HAVE_STATX
