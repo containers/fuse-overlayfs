@@ -31,6 +31,9 @@
 # include <fcntl.h>
 # include "fuse-overlayfs.h"
 
+# define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
+# define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
+
 void cleanup_freep (void *p);
 void cleanup_filep (FILE **f);
 void cleanup_closep (void *p);
@@ -54,5 +57,7 @@ void statx_to_stat (struct statx *stx, struct stat *st);
 # endif
 
 int safe_openat (int dirfd, const char *pathname, int flags, mode_t mode);
+
+int override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st);
 
 #endif

@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
@@ -221,4 +222,71 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
     }
 
   return *fd;
+}
+
+int
+override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st)
+{
+  int ret;
+  uid_t uid;
+  gid_t gid;
+  mode_t mode;
+  char buf[64];
+  cleanup_close int cleanup_fd = -1;
+  const char *xattr_name;
+
+  if (l->has_stat_override == 0 && l->has_privileged_stat_override == 0)
+    return 0;
+
+  xattr_name = l->has_privileged_stat_override ? XATTR_PRIVILEGED_OVERRIDE_STAT : XATTR_OVERRIDE_STAT;
+
+  if (fd >= 0)
+    {
+      ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
+      if (ret < 0)
+        return ret;
+    }
+  else if (abs_path)
+    {
+      ret = lgetxattr (abs_path, xattr_name, buf, sizeof (buf) - 1);
+      if (ret < 0)
+        return ret;
+    }
+  else
+    {
+      char full_path[PATH_MAX];
+
+      full_path[0] = '\0';
+      ret = open_fd_or_get_path (l, path, full_path, &cleanup_fd, O_RDONLY);
+      if (ret < 0)
+        return ret;
+      fd = cleanup_fd;
+
+      if (fd >= 0)
+        ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
+      else
+        {
+          ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
+          if (ret < 0 && errno == ENODATA)
+            return 0;
+        }
+
+      if (ret < 0)
+        return ret;
+    }
+
+  buf[ret] = '\0';
+
+  ret = sscanf (buf, "%d:%d:%o", &uid, &gid, &mode);
+  if (ret != 3)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
+  st->st_uid = uid;
+  st->st_gid = gid;
+  st->st_mode = (st->st_mode & S_IFMT) | mode;
+
+  return 0;
 }

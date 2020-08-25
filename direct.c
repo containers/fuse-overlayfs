@@ -34,9 +34,6 @@
 
 #include "utils.h"
 
-#define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
-#define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
-
 static int
 direct_file_exists (struct ovl_layer *l, const char *pathname)
 {
@@ -80,64 +77,6 @@ direct_getxattr (struct ovl_layer *l, const char *path, const char *name, char *
 }
 
 static int
-override_mode (struct ovl_layer *l, int fd, const char *path, struct stat *st)
-{
-  int ret;
-  uid_t uid;
-  gid_t gid;
-  mode_t mode;
-  char buf[64];
-  cleanup_close int cleanup_fd = -1;
-  const char *xattr_name;
-
-  if (l->has_stat_override == 0 && l->has_privileged_stat_override == 0)
-    return 0;
-
-  xattr_name = l->has_privileged_stat_override ? XATTR_PRIVILEGED_OVERRIDE_STAT : XATTR_OVERRIDE_STAT;
-
-  if (fd >= 0)
-    {
-      ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
-      if (ret < 0)
-        return ret;
-    }
-  else
-    {
-      char full_path[PATH_MAX];
-
-      full_path[0] = '\0';
-      ret = open_fd_or_get_path (l, path, full_path, &cleanup_fd, O_RDONLY);
-      if (ret < 0)
-        return ret;
-      fd = cleanup_fd;
-
-      if (fd >= 0)
-        ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
-      else
-          ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
-
-      if (ret < 0)
-        return ret;
-    }
-
-  buf[ret] = '\0';
-
-  ret = sscanf (buf, "%d:%d:%o", &uid, &gid, &mode);
-  if (ret != 3)
-    {
-      errno = EINVAL;
-      return -1;
-    }
-
-  st->st_uid = uid;
-  st->st_gid = gid;
-  st->st_mode = (st->st_mode & S_IFMT) | mode;
-
-  return 0;
-}
-
-
-static int
 direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, struct stat *st)
 {
   int ret;
@@ -151,7 +90,7 @@ direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, 
   if (ret == 0)
     {
       statx_to_stat (&stx, st);
-      return override_mode (l, fd, path, st);
+      return override_mode (l, fd, NULL, path, st);
     }
 
   return ret;
@@ -162,7 +101,7 @@ direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, 
   if (ret != 0)
     return ret;
 
-  return override_mode (l, fd, path, st);
+  return override_mode (l, fd, NULL, path, st);
 }
 
 static int
@@ -179,7 +118,7 @@ direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags
   if (ret == 0)
     {
       statx_to_stat (&stx, st);
-      return override_mode (l, -1, path, st);
+      return override_mode (l, -1, NULL, path, st);
     }
 
   return ret;
@@ -189,7 +128,7 @@ direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags
   if (ret != 0)
     return ret;
 
-  return override_mode (l, -1, path, st);
+  return override_mode (l, -1, NULL, path, st);
 }
 
 static struct dirent *
@@ -274,6 +213,12 @@ direct_num_of_layers (const char *opaque, const char *path)
   return 1;
 }
 
+static bool
+direct_must_be_remapped (struct ovl_layer *l)
+{
+  return l->has_privileged_stat_override == 0 && l->has_stat_override == 0;
+}
+
 struct data_source direct_access_ds =
   {
    .num_of_layers = direct_num_of_layers,
@@ -289,4 +234,5 @@ struct data_source direct_access_ds =
    .getxattr = direct_getxattr,
    .listxattr = direct_listxattr,
    .readlinkat = direct_readlinkat,
+   .must_be_remapped = direct_must_be_remapped,
   };
