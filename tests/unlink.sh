@@ -1,6 +1,11 @@
 #!/bin/sh
 
-rm -rf lower upper workdir merged
+set -ex
+
+rm -rf unlink-test
+mkdir unlink-test
+
+cd unlink-test
 
 mkdir lower upper workdir merged
 
@@ -21,4 +26,4 @@ echo world >> merged/foo2
 grep hello merged/foo
 grep world merged/foo
 
-umount merged
+umount merged || [ $? -eq "${EXPECT_UMOUNT_STATUS:-0}" ]

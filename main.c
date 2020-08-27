@@ -5414,6 +5414,9 @@ main (int argc, char *argv[])
       if (path == NULL)
         goto err_out1;
       mkdir (path, 0700);
+      path = realloc(path, strlen(path)+strlen("/work")+1);
+      if (!path)
+        error (EXIT_FAILURE, errno, "allocating workdir path");
       strcat (path, "/work");
       mkdir (path, 0700);
       free (lo.workdir);
