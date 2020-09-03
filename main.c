@@ -542,7 +542,7 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
       sprintf (proc_path, "/proc/self/fd/%d", fd);
       return write_permission_xattr (lo, -1, proc_path, uid, gid, mode);
     }
-  return fchownat (dfd, path, uid, gid, 0);
+  return fchownat (dfd, path, uid, gid, flags);
 }
 /* Make sure it is not used anymore.  */
 #define fchownat ERROR
@@ -3973,7 +3973,7 @@ direct_symlinkat (struct ovl_layer *l, const char *target, const char *linkpath,
 
   if (uid != lo->uid || gid != lo->gid || l->has_stat_override || l->has_privileged_stat_override)
     {
-      ret = do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, uid, gid, AT_SYMLINK_NOFOLLOW, 0755);
+      ret = do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, uid, gid, 0755, AT_SYMLINK_NOFOLLOW);
       if (ret < 0)
         {
           unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
@@ -4581,7 +4581,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
 
-  if (do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), 0, mode) < 0)
+  if (do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode, 0) < 0)
     {
       fuse_reply_err (req, errno);
       unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
