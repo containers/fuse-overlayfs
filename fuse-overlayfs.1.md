@@ -45,7 +45,7 @@ Specifies the dynamic UID/GID mapping used by fuse-overlayfs when
 reading/writing files to the system.
 
 The fuse-overlayfs dynamic mapping is an alternative and cheaper way
-to chown'ing the files on the host to accomodate the user namespace
+to chown'ing the files on the host to accommodate the user namespace
 settings.
 
 It is useful to share the same storage among different user namespaces
