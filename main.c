@@ -219,7 +219,7 @@ typedef unsigned char uuid_t[16];
 /* The type returned by overlay exportfs ops when encoding an ovl_fh handle */
 #define OVL_FILEID	0xfb
 
-/* On-disk and in-memeory format for redirect by file handle */
+/* On-disk and in-memory format for redirect by file handle */
 struct ovl_fh
 {
   u8 version;  /* 0 */

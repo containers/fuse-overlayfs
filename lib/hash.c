@@ -646,7 +646,7 @@ hash_initialize (size_t candidate, const Hash_tuning *tuning,
 }
 
 /* Make all buckets empty, placing any chained entries on the free list.
-   Apply the user-specified function data_freer (if any) to the datas of any
+   Apply the user-specified function data_freer (if any) to the data of any
    affected entries.  */
 
 void

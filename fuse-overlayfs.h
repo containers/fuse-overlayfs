@@ -136,7 +136,7 @@ struct data_source
   bool (*must_be_remapped)(struct ovl_layer *l);
 };
 
-/* passtrough to the file system.  */
+/* passthrough to the file system.  */
 extern struct data_source direct_access_ds;
 
 # ifndef HAVE_STATX
