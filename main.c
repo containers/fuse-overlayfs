@@ -1365,7 +1365,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
               int r;
 
               r = it->ds->file_exists (it, whiteout_path);
-              if (r < 0 && errno != ENOENT && errno != ENOTDIR)
+              if (r < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
                return NULL;
 
               if (r == 0)
@@ -1546,7 +1546,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         stop_lookup = true;
 
       ret = it->ds->file_exists (it, parent_whiteout_path);
-      if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+      if (ret < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
         return NULL;
 
       if (ret == 0)
@@ -1600,7 +1600,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
 
           ret = it->ds->file_exists (it, whiteout_path);
-          if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+          if (ret < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
             {
               it->ds->closedir (dp);
               return NULL;
@@ -1908,7 +1908,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
                   strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
 
                   ret = it->ds->file_exists (it, whpath);
-                  if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+                  if (ret < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
                     return NULL;
                   if (ret == 0)
                     {
@@ -1937,7 +1937,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
 
           strconcat3 (whpath, PATH_MAX, pnode->path, "/.wh.", name);
           ret = it->ds->file_exists (it, whpath);
-          if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+          if (ret < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
             return NULL;
           if (ret == 0)
               node = make_whiteout_node (path, name);
