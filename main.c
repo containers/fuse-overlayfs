@@ -145,7 +145,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
 #define OPAQUE_WHITEOUT ".wh..wh..opq"
-#define WHITEOUT_MAX_LEN (sizeof (OPAQUE_WHITEOUT))
+#define WHITEOUT_MAX_LEN (sizeof (".wh.")-1)
 
 #if !defined FICLONE && defined __linux__
 # define FICLONE _IOW (0x94, 9, int)
@@ -3583,6 +3583,43 @@ do_getattr (fuse_req_t req, struct fuse_entry_param *e, struct ovl_node *node, i
   return 0;
 }
 
+static int
+do_statfs (struct ovl_data *lo, struct statvfs *sfs)
+{
+  int ret, fd;
+
+  fd = get_first_layer (lo)->fd;
+
+  if (fd >= 0)
+    ret = fstatvfs (fd, sfs);
+  else
+    ret = statvfs (lo->mountpoint, sfs);
+  if (ret < 0)
+    return ret;
+
+  sfs->f_namemax -= WHITEOUT_MAX_LEN;
+  return 0;
+}
+
+static short
+get_fs_namemax (struct ovl_data *lo)
+{
+  static short namemax = 0;
+  if (namemax == 0)
+    {
+      struct statvfs sfs;
+      int ret;
+
+      ret = do_statfs (lo, &sfs);
+      /* On errors use a sane default.  */
+      if (ret < 0)
+        namemax = 255 - WHITEOUT_MAX_LEN;
+      else
+        namemax = sfs.f_namemax;
+    }
+  return namemax;
+}
+
 static void
 ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
 	   mode_t mode, struct fuse_file_info *fi)
@@ -3591,11 +3628,18 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   cleanup_close int fd = -1;
   struct fuse_entry_param e;
   struct ovl_node *node = NULL;
+  struct ovl_data *lo = ovl_data (req);
   struct stat st;
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_create(parent=%" PRIu64 ", name=%s)\n",
 	     parent, name);
+
+  if (strlen (name) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
 
   fi->flags = fi->flags | O_CREAT;
 
@@ -3869,6 +3913,12 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
 
+  if (strlen (newname) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
+
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
     {
@@ -4007,6 +4057,12 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
+
+  if (strlen (name) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
 
   pnode = do_lookup_file (lo, parent, NULL);
   if (pnode == NULL || pnode->whiteout)
@@ -4411,8 +4467,16 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
            unsigned int flags)
 {
   cleanup_lock int l = enter_big_lock ();
+  struct ovl_data *lo = ovl_data (req);
+
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
+
+  if (strlen (newname) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
 
   if (flags & RENAME_EXCHANGE)
     ovl_rename_exchange (req, parent, name, newparent, newname, flags);
@@ -4423,26 +4487,16 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
 static void
 ovl_statfs (fuse_req_t req, fuse_ino_t ino)
 {
-  int ret, fd;
+  int ret;
   struct statvfs sfs;
   struct ovl_data *lo = ovl_data (req);
 
-  if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_statfs(ino=%" PRIu64 "s)\n", ino);
-
-  fd = get_first_layer (lo)->fd;
-
-  if (fd >= 0)
-    ret = fstatvfs (fd, &sfs);
-  else
-    ret = statvfs (lo->mountpoint, &sfs);
+  ret = do_statfs (lo, &sfs);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
       return;
     }
-
-  sfs.f_namemax -= WHITEOUT_MAX_LEN;
 
   fuse_reply_statfs (req, &sfs);
 }
@@ -4555,6 +4609,12 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     fprintf (stderr, "ovl_mknod(ino=%" PRIu64 ", name=%s, mode=%d, rdev=%lu)\n",
 	     parent, name, mode, rdev);
 
+  if (strlen (name) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
+
   mode = mode & ~ctx->umask;
 
   node = do_lookup_file (lo, parent, name);
@@ -4664,6 +4724,13 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
 	     parent, name, mode);
+
+
+  if (strlen (name) > get_fs_namemax (lo))
+    {
+      fuse_reply_err (req, ENAMETOOLONG);
+      return;
+    }
 
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && !node->whiteout)
