@@ -145,6 +145,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
 #define OPAQUE_WHITEOUT ".wh..wh..opq"
+#define WHITEOUT_MAX_LEN (sizeof (OPAQUE_WHITEOUT))
 
 #if !defined FICLONE && defined __linux__
 # define FICLONE _IOW (0x94, 9, int)
@@ -4440,6 +4441,9 @@ ovl_statfs (fuse_req_t req, fuse_ino_t ino)
       fuse_reply_err (req, errno);
       return;
     }
+
+  sfs.f_namemax -= WHITEOUT_MAX_LEN;
+
   fuse_reply_statfs (req, &sfs);
 }
 
