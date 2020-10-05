@@ -188,3 +188,14 @@ mkdir merged/adir
 touch -h -d "2020-01-02 10:11:12" merged/adir
 stat --format "%y" merged/adir | grep "10:11:12"
 stat --format "%x" merged/adir | grep "10:11:12"
+
+upper_max_filename_len=$(stat -f -c %l upper)
+merged_max_filename_len=$(stat -f -c %l merged)
+
+test $merged_max_filename_len -lt $upper_max_filename_len
+
+if touch merged/$(printf %${upper_max_filename_len}s | tr ' ' A}); then
+    exit 1
+fi
+
+touch merged/$(printf %${merged_max_filename_len}s | tr ' ' A})
