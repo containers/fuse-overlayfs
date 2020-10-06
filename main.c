@@ -168,6 +168,14 @@ static gid_t overflow_gid;
 
 static struct ovl_ino dummy_ino;
 
+struct stats_s
+{
+  size_t nodes;
+  size_t inodes;
+};
+
+static struct stats_s stats;
+
 static double
 get_timeout (struct ovl_data *lo)
 {
@@ -905,6 +913,7 @@ node_free (void *p)
   if (n->do_rmdir)
     unlinkat (n->hidden_dirfd, n->path, AT_REMOVEDIR);
 
+  stats.nodes--;
   free (n->name);
   free (n->path);
   free (n);
@@ -926,6 +935,7 @@ inode_free (void *p)
       node_free (tmp);
   }
 
+  stats.inodes--;
   free (i);
 }
 
@@ -1143,6 +1153,7 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
       return NULL;
     }
 
+  stats.inodes++;
   return ino->node;
 }
 
@@ -1248,6 +1259,7 @@ make_whiteout_node (const char *path, const char *name)
   ret_xchg = ret;
   ret = NULL;
 
+  stats.nodes++;
   return ret_xchg;
 }
 
@@ -1460,6 +1472,7 @@ no_fd:
   ret_xchg = ret;
   ret = NULL;
 
+  stats.nodes++;
   return register_inode (lo, ret_xchg, mode);
 }
 
