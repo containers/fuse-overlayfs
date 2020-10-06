@@ -951,6 +951,13 @@ drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 
   ino = node->ino;
 
+  if (ino->lookups == 0)
+    {
+      hash_delete (inodes, ino);
+      inode_free (ino);
+      return;
+    }
+
   /* If it is the only node referenced by the inode, do not destroy it.  */
   if (ino->node == node && node->next_link == NULL)
     return;
