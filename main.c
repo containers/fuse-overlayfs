@@ -50,23 +50,18 @@
 #include <hash.h>
 #include <sys/statvfs.h>
 #include <sys/file.h>
-
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
-
 #include <sys/xattr.h>
-
 #include <linux/fs.h>
-
 #include <sys/time.h>
 #include <sys/resource.h>
-
-#include <utils.h>
-
 #include <pthread.h>
 
+#include <utils.h>
 #include <plugin.h>
 
 #ifndef TEMP_FAILURE_RETRY
@@ -174,7 +169,16 @@ struct stats_s
   size_t inodes;
 };
 
-static struct stats_s stats;
+static volatile struct stats_s stats;
+
+static void
+print_stats (int sig)
+{
+  char fmt[128];
+  int l = snprintf (fmt, sizeof (fmt) - 1, "# INODES: %zu\n# NODES: %zu\n", stats.inodes, stats.nodes);
+  fmt[l] = '\0';
+  write (STDERR_FILENO, fmt, l + 1);
+}
 
 static double
 get_timeout (struct ovl_data *lo)
@@ -5462,6 +5466,9 @@ main (int argc, char *argv[])
       error (0, errno, "cannot set signal handler");
       goto err_out2;
     }
+
+  signal (SIGUSR1, print_stats);
+
   if (fuse_session_mount (se, lo.mountpoint) != 0)
     {
       error (0, errno, "cannot mount");
