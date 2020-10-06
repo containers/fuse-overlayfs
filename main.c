@@ -1178,6 +1178,37 @@ do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
   return true;
 }
 
+/* cleanup any inode that has 0 lookups.  */
+static void
+cleanup_inodes (struct ovl_data *lo)
+{
+  cleanup_free struct ovl_ino **to_cleanup = NULL;
+  size_t no_lookups = 0;
+  struct ovl_ino *it;
+  size_t i;
+
+  /* Also attempt to cleanup any inode that has 0 lookups.  */
+  for (it = hash_get_first (lo->inodes); it; it = hash_get_next (lo->inodes, it))
+    {
+      if (it->lookups == 0)
+        no_lookups++;
+    }
+  if (no_lookups > 0)
+    {
+      to_cleanup = malloc (sizeof (*to_cleanup) * no_lookups);
+      if (! to_cleanup)
+        return;
+
+      for (i = 0, it = hash_get_first (lo->inodes); it; it = hash_get_next (lo->inodes, it))
+        {
+          if (it->lookups == 0)
+            to_cleanup[i++] = it;
+        }
+      for (i = 0; i < no_lookups; i++)
+        do_forget (lo, (fuse_ino_t) to_cleanup[i], 0);
+    }
+}
+
 static void
 ovl_forget (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 {
@@ -1204,6 +1235,8 @@ ovl_forget_multi (fuse_req_t req, size_t count, struct fuse_forget_data *forgets
 
   for (i = 0; i < count; i++)
     do_forget (lo, forgets[i].ino, forgets[i].nlookup);
+
+  cleanup_inodes (lo);
 
   fuse_reply_none (req);
 }
