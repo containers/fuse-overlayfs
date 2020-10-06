@@ -948,18 +948,14 @@ drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 {
   struct ovl_ino *ino;
   struct ovl_node *it, *prev = NULL;
-  size_t len = 0;
 
   ino = node->ino;
 
-  for (it = ino->node; it; it = it->next_link)
-    len++;
-
-  if (len == 1 && node->ino->lookups > 0)
+  /* If it is the only node referenced by the inode, do not destroy it.  */
+  if (ino->node == node && node->next_link == NULL)
     return;
 
   node->ino = NULL;
-  ino->lookups -= node->node_lookups;
 
   for (it = ino->node; it; it = it->next_link)
     {
@@ -1161,17 +1157,17 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
   return ino->node;
 }
 
-static void
+static bool
 do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
 {
   struct ovl_ino *i;
 
   if (ino == FUSE_ROOT_ID || ino == 0)
-    return;
+    return false;
 
   i = lookup_inode (lo, ino);
-  if (i == NULL)
-    return;
+  if (i == NULL || i == &dummy_ino)
+    return false;
 
   i->lookups -= nlookup;
   if (i->lookups <= 0)
@@ -1179,6 +1175,7 @@ do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
       hash_delete (lo->inodes, i);
       inode_free (i);
     }
+  return true;
 }
 
 static void
@@ -2338,6 +2335,7 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   cleanup_lock int l = enter_big_lock ();
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
+  struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
@@ -2345,9 +2343,7 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   for (s = 2; s < d->tbl_size; s++)
     {
       d->tbl[s]->node_lookups--;
-      if (d->tbl[s]->ino)
-        d->tbl[s]->ino->lookups--;
-      else
+      if (! do_forget (lo, (fuse_ino_t) d->tbl[s]->ino, 1))
         {
           if (d->tbl[s]->node_lookups == 0)
             node_free (d->tbl[s]);
