@@ -50,23 +50,18 @@
 #include <hash.h>
 #include <sys/statvfs.h>
 #include <sys/file.h>
-
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
-
 #include <sys/xattr.h>
-
 #include <linux/fs.h>
-
 #include <sys/time.h>
 #include <sys/resource.h>
-
-#include <utils.h>
-
 #include <pthread.h>
 
+#include <utils.h>
 #include <plugin.h>
 
 #ifndef TEMP_FAILURE_RETRY
@@ -168,6 +163,23 @@ static uid_t overflow_uid;
 static gid_t overflow_gid;
 
 static struct ovl_ino dummy_ino;
+
+struct stats_s
+{
+  size_t nodes;
+  size_t inodes;
+};
+
+static volatile struct stats_s stats;
+
+static void
+print_stats (int sig)
+{
+  char fmt[128];
+  int l = snprintf (fmt, sizeof (fmt) - 1, "# INODES: %zu\n# NODES: %zu\n", stats.inodes, stats.nodes);
+  fmt[l] = '\0';
+  write (STDERR_FILENO, fmt, l + 1);
+}
 
 static double
 get_timeout (struct ovl_data *lo)
@@ -906,6 +918,7 @@ node_free (void *p)
   if (n->do_rmdir)
     unlinkat (n->hidden_dirfd, n->path, AT_REMOVEDIR);
 
+  stats.nodes--;
   free (n->name);
   free (n->path);
   free (n);
@@ -927,6 +940,7 @@ inode_free (void *p)
       node_free (tmp);
   }
 
+  stats.inodes--;
   free (i);
 }
 
@@ -935,18 +949,21 @@ drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 {
   struct ovl_ino *ino;
   struct ovl_node *it, *prev = NULL;
-  size_t len = 0;
 
   ino = node->ino;
 
-  for (it = ino->node; it; it = it->next_link)
-    len++;
+  if (ino->lookups == 0)
+    {
+      hash_delete (inodes, ino);
+      inode_free (ino);
+      return;
+    }
 
-  if (len == 1 && node->ino->lookups > 0)
+  /* If it is the only node referenced by the inode, do not destroy it.  */
+  if (ino->node == node && node->next_link == NULL)
     return;
 
   node->ino = NULL;
-  ino->lookups -= node->node_lookups;
 
   for (it = ino->node; it; it = it->next_link)
     {
@@ -1144,26 +1161,59 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
       return NULL;
     }
 
+  stats.inodes++;
   return ino->node;
 }
 
-static void
+static bool
 do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
 {
   struct ovl_ino *i;
 
   if (ino == FUSE_ROOT_ID || ino == 0)
-    return;
+    return false;
 
   i = lookup_inode (lo, ino);
-  if (i == NULL)
-    return;
+  if (i == NULL || i == &dummy_ino)
+    return false;
 
   i->lookups -= nlookup;
   if (i->lookups <= 0)
     {
       hash_delete (lo->inodes, i);
       inode_free (i);
+    }
+  return true;
+}
+
+/* cleanup any inode that has 0 lookups.  */
+static void
+cleanup_inodes (struct ovl_data *lo)
+{
+  cleanup_free struct ovl_ino **to_cleanup = NULL;
+  size_t no_lookups = 0;
+  struct ovl_ino *it;
+  size_t i;
+
+  /* Also attempt to cleanup any inode that has 0 lookups.  */
+  for (it = hash_get_first (lo->inodes); it; it = hash_get_next (lo->inodes, it))
+    {
+      if (it->lookups == 0)
+        no_lookups++;
+    }
+  if (no_lookups > 0)
+    {
+      to_cleanup = malloc (sizeof (*to_cleanup) * no_lookups);
+      if (! to_cleanup)
+        return;
+
+      for (i = 0, it = hash_get_first (lo->inodes); it; it = hash_get_next (lo->inodes, it))
+        {
+          if (it->lookups == 0)
+            to_cleanup[i++] = it;
+        }
+      for (i = 0; i < no_lookups; i++)
+        do_forget (lo, (fuse_ino_t) to_cleanup[i], 0);
     }
 }
 
@@ -1193,6 +1243,8 @@ ovl_forget_multi (fuse_req_t req, size_t count, struct fuse_forget_data *forgets
 
   for (i = 0; i < count; i++)
     do_forget (lo, forgets[i].ino, forgets[i].nlookup);
+
+  cleanup_inodes (lo);
 
   fuse_reply_none (req);
 }
@@ -1249,6 +1301,7 @@ make_whiteout_node (const char *path, const char *name)
   ret_xchg = ret;
   ret = NULL;
 
+  stats.nodes++;
   return ret_xchg;
 }
 
@@ -1461,6 +1514,7 @@ no_fd:
   ret_xchg = ret;
   ret = NULL;
 
+  stats.nodes++;
   return register_inode (lo, ret_xchg, mode);
 }
 
@@ -2322,6 +2376,7 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   cleanup_lock int l = enter_big_lock ();
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
+  struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
@@ -2329,9 +2384,7 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   for (s = 2; s < d->tbl_size; s++)
     {
       d->tbl[s]->node_lookups--;
-      if (d->tbl[s]->ino)
-        d->tbl[s]->ino->lookups--;
-      else
+      if (! do_forget (lo, (fuse_ino_t) d->tbl[s]->ino, 1))
         {
           if (d->tbl[s]->node_lookups == 0)
             node_free (d->tbl[s]);
@@ -5520,6 +5573,9 @@ main (int argc, char *argv[])
       error (0, errno, "cannot set signal handler");
       goto err_out2;
     }
+
+  signal (SIGUSR1, print_stats);
+
   if (fuse_session_mount (se, lo.mountpoint) != 0)
     {
       error (0, errno, "cannot mount");
