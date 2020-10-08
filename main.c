@@ -218,6 +218,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, plugins), 0},
   {"xattr_permissions=%d",
    offsetof (struct ovl_data, xattr_permissions), 0},
+  {"squash_to_root",
+   offsetof (struct ovl_data, squash_to_root), 1},
   FUSE_OPT_END
 };
 
@@ -525,9 +527,12 @@ write_permission_xattr (struct ovl_data *lo, int fd, const char *path, uid_t uid
 static int
 do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
 {
+  int ret;
   if (lo->xattr_permissions)
-    return write_permission_xattr (lo, fd, NULL, uid, gid, mode);
-  return fchown (fd, uid, gid);
+    ret = write_permission_xattr (lo, fd, NULL, uid, gid, mode);
+  else
+    ret = fchown (fd, uid, gid);
+  return (lo->squash_to_root ? 0 : ret);
 }
 /* Make sure it is not used anymore.  */
 #define fchown ERROR
@@ -535,9 +540,12 @@ do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
 static int
 do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mode)
 {
+  int ret;
   if (lo->xattr_permissions)
-    return write_permission_xattr (lo, -1, path, uid, gid, mode);
-  return chown (path, uid, gid);
+    ret = write_permission_xattr (lo, -1, path, uid, gid, mode);
+  else
+    ret = chown (path, uid, gid);
+  return (lo->squash_to_root ? 0 : ret);
 }
 /* Make sure it is not used anymore.  */
 #define chown ERROR
@@ -545,6 +553,7 @@ do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mo
 static int
 do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gid, mode_t mode, int flags)
 {
+  int ret;
   if (lo->xattr_permissions)
     {
       char proc_path[32];
@@ -553,9 +562,11 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
         return fd;
 
       sprintf (proc_path, "/proc/self/fd/%d", fd);
-      return write_permission_xattr (lo, -1, proc_path, uid, gid, mode);
+      ret = write_permission_xattr (lo, -1, proc_path, uid, gid, mode);
     }
-  return fchownat (dfd, path, uid, gid, flags);
+  else
+    ret = fchownat (dfd, path, uid, gid, flags);
+  return (lo->squash_to_root ? 0 : ret);
 }
 /* Make sure it is not used anymore.  */
 #define fchownat ERROR
@@ -792,8 +803,15 @@ delete_whiteout (struct ovl_data *lo, int dirfd, struct ovl_node *parent, const 
 }
 
 static unsigned int
-find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool uid)
+find_mapping (unsigned int id, const struct ovl_data *data,
+              bool direct, bool uid)
 {
+  const struct ovl_mapping *mapping = (uid ? data->uid_mappings
+                                       : data->gid_mappings);
+
+  if (direct && data->squash_to_root)
+    return 0;
+
   if (mapping == NULL)
     return id;
   for (; mapping; mapping = mapping->next)
@@ -815,13 +833,13 @@ find_mapping (unsigned int id, struct ovl_mapping *mapping, bool direct, bool ui
 static uid_t
 get_uid (struct ovl_data *data, uid_t id)
 {
-  return find_mapping (id, data->uid_mappings, false, true);
+  return find_mapping (id, data, false, true);
 }
 
 static uid_t
 get_gid (struct ovl_data *data, gid_t id)
 {
-  return find_mapping (id, data->gid_mappings, false, false);
+  return find_mapping (id, data, false, false);
 }
 
 static int
@@ -847,8 +865,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   if (l->ds->must_be_remapped && l->ds->must_be_remapped (l))
     {
-      st->st_uid = find_mapping (st->st_uid, data->uid_mappings, true, true);
-      st->st_gid = find_mapping (st->st_gid, data->gid_mappings, true, false);
+      st->st_uid = find_mapping (st->st_uid, data, true, true);
+      st->st_gid = find_mapping (st->st_gid, data, true, false);
     }
 
   st->st_ino = node->tmp_ino;
@@ -4978,7 +4996,7 @@ direct_ioctl (struct ovl_layer *l, int fd, int cmd, unsigned long *r)
 }
 
 static void
-ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
+ovl_ioctl (fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
            struct fuse_file_info *fi, unsigned int flags,
            const void *in_buf, size_t in_bufsz, size_t out_bufsz)
 {
