@@ -1,3 +1,11 @@
+* fuse-overlayfs-1.2
+
+- fix segfault if no mountpoint specified
+- fix file_exists_at musl compatibility
+- introduce extended attribute to override gid/uid/mode.
+- support writing uid/gid/mode to an extended attribute.
+- fix a memory leak, where inodes are maintained in memory even if not needed.
+
 * fuse-overlayfs-1.1.2
 
 - fix build issues with libmusl.
