@@ -6,8 +6,6 @@ ACLOCAL_AMFLAGS = -Im4
 
 EXTRA_DIST = m4/gnulib-cache.m4 rpm/fuse-overlayfs.spec.template autogen.sh fuse-overlayfs.1.md utils.h NEWS tests/suid-test.c plugin.h plugin-manager.h fuse-overlayfs.h fuse_overlayfs_error.h
 
-CLEANFILES = fuse-overlayfs.1
-
 AM_CPPFLAGS = -DPKGLIBEXECDIR='"$(pkglibexecdir)"'
 
 fuse_overlayfs_CFLAGS = -I . -I $(abs_srcdir)/lib $(FUSE_CFLAGS)
@@ -20,7 +18,9 @@ WD := $(shell pwd)
 man1_MANS = fuse-overlayfs.1
 
 fuse-overlayfs.1:
+if HAVE_MD2MAN
 	go-md2man -in $(abs_srcdir)/fuse-overlayfs.1.md -out fuse-overlayfs.1
+endif HAVE_MD2MAN
 
 generate-man: fuse-overlayfs.1
 
