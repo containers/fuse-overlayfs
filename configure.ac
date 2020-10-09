@@ -69,6 +69,9 @@ void foo()
 CFLAGS=$old_CFLAGS
 LDFLAGS=$old_LDFLAGS
 
+AC_PATH_PROG(MD2MAN, go-md2man)
+AM_CONDITIONAL([HAVE_MD2MAN], [test "x$ac_cv_path_MD2MAN" != x])
+
 AC_DEFINE_UNQUOTED([HAVE_FUSE_CACHE_READDIR], $cache_readdir, [Define if libfuse cache_readdir is available])
 AC_DEFINE_UNQUOTED([HAVE_FUSE_COPY_FILE_RANGE], $fuse_has_copy_file_range, [Define if libfuse has copy_file_range is available])
 
