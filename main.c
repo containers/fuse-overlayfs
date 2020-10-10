@@ -2676,6 +2676,9 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   char wd_tmp_file_name[32];
   bool need_rename;
 
+  if (lo->xattr_permissions)
+    mode |= 0755;
+
   need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
   if (!need_rename)
     {
@@ -2872,6 +2875,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   char wd_tmp_file_name[32];
   static bool support_reflinks = true;
   bool data_copied = false;
+  mode_t mode;
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
@@ -2886,7 +2890,11 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
         return ret;
     }
 
-  if ((st.st_mode & S_IFMT) == S_IFDIR)
+  mode = st.st_mode;
+  if (lo->xattr_permissions)
+    mode |= 0755;
+
+  if ((mode & S_IFMT) == S_IFDIR)
     {
       ret = create_node_directory (lo, node);
       if (ret < 0)
@@ -2894,7 +2902,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
       goto success;
     }
 
-  if ((st.st_mode & S_IFMT) == S_IFLNK)
+  if ((mode & S_IFMT) == S_IFLNK)
     {
       size_t current_size = PATH_MAX + 1;
       cleanup_free char *p = malloc (current_size);
@@ -2926,13 +2934,13 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (sfd < 0)
     goto exit;
 
-  ret = dfd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, st.st_mode));
+  ret = dfd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, O_CREAT|O_WRONLY, mode));
   if (dfd < 0)
     goto exit;
 
   if (st.st_uid != lo->uid || st.st_gid != lo->gid || get_upper_layer (lo)->has_stat_override || get_upper_layer (lo)->has_privileged_stat_override)
     {
-      ret = do_fchown (lo, dfd, st.st_uid, st.st_gid, st.st_mode);
+      ret = do_fchown (lo, dfd, st.st_uid, st.st_gid, mode);
       if (ret < 0)
         goto exit;
     }
@@ -3507,7 +3515,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       uid = get_uid (lo, ctx->uid);
       gid = get_gid (lo, ctx->gid);
 
-      fd = direct_create_file (get_upper_layer (lo), get_upper_layer (lo)->fd, path, uid, gid, flags, mode & ~ctx->umask);
+      fd = direct_create_file (get_upper_layer (lo), get_upper_layer (lo)->fd, path, uid, gid, flags, (mode & ~ctx->umask) | (lo->xattr_permissions ? 0755 : 0));
       if (fd < 0)
         return fd;
 
@@ -3713,6 +3721,9 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
   fi->flags = fi->flags | O_CREAT;
+
+  if (lo->xattr_permissions)
+    mode |= 0755;
 
   fd = ovl_do_open (req, parent, name, fi->flags, mode, &node, &st);
   if (fd < 0)
@@ -4688,6 +4699,9 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
 
   mode = mode & ~ctx->umask;
 
+  if (lo->xattr_permissions)
+    mode |= 0755;
+
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && !node->whiteout)
     {
@@ -4796,12 +4810,13 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
     fprintf (stderr, "ovl_mkdir(ino=%" PRIu64 ", name=%s, mode=%d)\n",
 	     parent, name, mode);
 
-
   if (strlen (name) > get_fs_namemax (lo))
     {
       fuse_reply_err (req, ENAMETOOLONG);
       return;
     }
+  if (lo->xattr_permissions)
+    mode |= 0755;
 
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && !node->whiteout)
