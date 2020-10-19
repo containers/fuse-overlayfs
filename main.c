@@ -2134,7 +2134,7 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
   if (d == NULL)
     {
-      errno = ENOENT;
+      errno = ENOMEM;
       goto out_errno;
     }
 
