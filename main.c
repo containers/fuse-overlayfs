@@ -2289,7 +2289,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
   buffer = malloc (size);
   if (buffer == NULL)
     {
-      fuse_reply_err (req, ENOMEM);
+      fuse_reply_err (req, errno);
       return;
     }
   p = buffer;
@@ -2446,7 +2446,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       buf = malloc (size);
       if (buf == NULL)
         {
-          fuse_reply_err (req, ENOMEM);
+          fuse_reply_err (req, errno);
           return;
         }
     }
@@ -2525,7 +2525,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       buf = malloc (size);
       if (buf == NULL)
         {
-          fuse_reply_err (req, ENOMEM);
+          fuse_reply_err (req, errno);
           return;
         }
     }
@@ -4607,7 +4607,7 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
   buf = malloc (current_size);
   if (buf == NULL)
     {
-      fuse_reply_err (req, ENOENT);
+      fuse_reply_err (req, errno);
       return;
     }
 
