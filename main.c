@@ -5470,7 +5470,7 @@ main (int argc, char *argv[])
   if (lo.debug)
     {
       fprintf (stderr, "uid=%s\n", lo.uid_str ? : "unchanged");
-      fprintf (stderr, "uid=%s\n", lo.gid_str ? : "unchanged");
+      fprintf (stderr, "gid=%s\n", lo.gid_str ? : "unchanged");
       fprintf (stderr, "upperdir=%s\n", lo.upperdir ? lo.upperdir : "NOT USED");
       fprintf (stderr, "workdir=%s\n", lo.workdir ? lo.workdir : "NOT USED");
       fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
