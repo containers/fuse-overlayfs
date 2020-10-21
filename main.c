@@ -220,6 +220,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, xattr_permissions), 0},
   {"squash_to_root",
    offsetof (struct ovl_data, squash_to_root), 1},
+  {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
+   offsetof (struct ovl_data, fsync), 0},
   FUSE_OPT_END
 };
 
@@ -5476,6 +5478,7 @@ main (int argc, char *argv[])
       fprintf (stderr, "lowerdir=%s\n", lo.lowerdir);
       fprintf (stderr, "mountpoint=%s\n", lo.mountpoint);
       fprintf (stderr, "plugins=%s\n", lo.plugins ? lo.plugins : "<none>");
+      fprintf (stderr, "fsync=%s\n", lo.fsync ? "enabled" : "disabled");
     }
 
   lo.uid_mappings = lo.uid_str ? read_mappings (lo.uid_str) : NULL;
