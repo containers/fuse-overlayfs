@@ -3278,7 +3278,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 "s, name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
+    fprintf (stderr, "ovl_setxattr(ino=%" PRIu64 ", name=%s, value=%s, size=%zu, flags=%d)\n", ino, name,
              value, size, flags);
 
   if (lo->disable_xattrs)
@@ -3351,7 +3351,7 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_removexattr(ino=%" PRIu64 "s, name=%s)\n", ino, name);
+    fprintf (stderr, "ovl_removexattr(ino=%" PRIu64 ", name=%s)\n", ino, name);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
@@ -3753,7 +3753,7 @@ ovl_open (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   cleanup_close int fd = -1;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_open(ino=%" PRIu64 "s)\n", ino);
+    fprintf (stderr, "ovl_open(ino=%" PRIu64 ")\n", ino);
 
   fd = ovl_do_open (req, ino, NULL, fi->flags, 0700, NULL, NULL);
   if (fd < 0)
@@ -3811,7 +3811,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   char path[PATH_MAX];
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_setattr(ino=%" PRIu64 "s, to_set=%d)\n", ino, to_set);
+    fprintf (stderr, "ovl_setattr(ino=%" PRIu64 ", to_set=%d)\n", ino, to_set);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
@@ -3993,7 +3993,7 @@ ovl_link (fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent, const char *newn
   char wd_tmp_file_name[32];
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_link(ino=%" PRIu64 "s, newparent=%" PRIu64 "s, newname=%s)\n", ino, newparent, newname);
+    fprintf (stderr, "ovl_link(ino=%" PRIu64 ", newparent=%" PRIu64 ", newname=%s)\n", ino, newparent, newname);
 
   if (strlen (newname) > get_fs_namemax (lo))
     {
@@ -4138,7 +4138,7 @@ ovl_symlink (fuse_req_t req, const char *link, fuse_ino_t parent, const char *na
   cleanup_free char *path = NULL;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 "s, name=%s)\n", link, parent, name);
+    fprintf (stderr, "ovl_symlink(link=%s, ino=%" PRIu64 ", name=%s)\n", link, parent, name);
 
   if (strlen (name) > get_fs_namemax (lo))
     {
@@ -4552,7 +4552,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_data *lo = ovl_data (req);
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_rename(ino=%" PRIu64 "s, name=%s , ino=%" PRIu64 "s, name=%s)\n", parent, name, newparent, newname);
+    fprintf (stderr, "ovl_rename(ino=%" PRIu64 ", name=%s , ino=%" PRIu64 ", name=%s)\n", parent, name, newparent, newname);
 
   if (strlen (newname) > get_fs_namemax (lo))
     {
@@ -4594,7 +4594,7 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
   int ret = 0;
 
   if (UNLIKELY (ovl_debug (req)))
-    fprintf (stderr, "ovl_readlink(ino=%" PRIu64 "s)\n", ino);
+    fprintf (stderr, "ovl_readlink(ino=%" PRIu64 ")\n", ino);
 
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
