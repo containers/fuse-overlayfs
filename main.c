@@ -3467,7 +3467,10 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
   n = do_lookup_file (lo, parent, name);
   if (n && n->hidden)
     {
-      n = NULL;
+      if (retnode)
+        *retnode = n;
+
+      return openat (n->hidden_dirfd, n->path, flags, mode);
     }
   if (n && !n->whiteout && (flags & O_CREAT))
     {
