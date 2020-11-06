@@ -104,6 +104,13 @@ struct ovl_data
   struct ovl_plugin_context *plugins_ctx;
 };
 
+enum stat_override_mode
+{
+  STAT_OVERRIDE_NONE,
+  STAT_OVERRIDE_USER,
+  STAT_OVERRIDE_PRIVILEGED,
+};
+
 struct ovl_layer
 {
   struct ovl_layer *next;
@@ -114,8 +121,7 @@ struct ovl_layer
   bool low;
 
   void *data_source_private_data;
-  unsigned int has_stat_override : 1;
-  unsigned int has_privileged_stat_override : 1;
+  int stat_override_mode;
 };
 
 /* a data_source defines the methods for accessing a lower layer.  */
