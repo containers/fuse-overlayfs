@@ -33,6 +33,7 @@
 
 # define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
 # define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
+# define XATTR_OVERRIDE_CONTAINERS_STAT "user.containers.override_stat"
 
 void cleanup_freep (void *p);
 void cleanup_filep (FILE **f);

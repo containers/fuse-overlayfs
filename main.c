@@ -2708,7 +2708,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
-  if (uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->has_stat_override || get_upper_layer (lo)->has_privileged_stat_override)
+  if (uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->stat_override_mode != STAT_OVERRIDE_NONE)
     {
       ret = do_fchown (lo, dfd, uid, gid, mode);
       if (ret < 0)
@@ -2937,7 +2937,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (dfd < 0)
     goto exit;
 
-  if (st.st_uid != lo->uid || st.st_gid != lo->gid || get_upper_layer (lo)->has_stat_override || get_upper_layer (lo)->has_privileged_stat_override)
+  if (st.st_uid != lo->uid || st.st_gid != lo->gid || get_upper_layer (lo)->stat_override_mode != STAT_OVERRIDE_NONE)
     {
       ret = do_fchown (lo, dfd, st.st_uid, st.st_gid, mode);
       if (ret < 0)
@@ -3393,7 +3393,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   int ret;
 
   /* try to create directly the file if it doesn't need to be chowned.  */
-  if (uid == lo->uid && gid == lo->gid && !l->has_stat_override && !l->has_privileged_stat_override)
+  if (uid == lo->uid && gid == lo->gid && l->stat_override_mode == STAT_OVERRIDE_NONE)
     {
       ret = TEMP_FAILURE_RETRY (safe_openat (get_upper_layer (lo)->fd, path, flags, mode));
       if (ret >= 0)
@@ -3407,7 +3407,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   fd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
   if (fd < 0)
     return -1;
-  if (uid != lo->uid || gid != lo->gid || l->has_stat_override || l->has_privileged_stat_override)
+  if (uid != lo->uid || gid != lo->gid || l->stat_override_mode != STAT_OVERRIDE_NONE)
     {
       if (do_fchown (lo, fd, uid, gid, mode) < 0)
         {
@@ -4106,7 +4106,7 @@ direct_symlinkat (struct ovl_layer *l, const char *target, const char *linkpath,
   if (ret < 0)
     return ret;
 
-  if (uid != lo->uid || gid != lo->gid || l->has_stat_override || l->has_privileged_stat_override)
+  if (uid != lo->uid || gid != lo->gid || l->stat_override_mode != STAT_OVERRIDE_NONE)
     {
       ret = do_fchownat (lo, lo->workdir_fd, wd_tmp_file_name, uid, gid, 0755, AT_SYMLINK_NOFOLLOW);
       if (ret < 0)
@@ -5522,12 +5522,12 @@ main (int argc, char *argv[])
           ssize_t s;
           if (lo.xattr_permissions == 1)
             {
-              get_upper_layer (&lo)->has_privileged_stat_override = 1;
+              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_PRIVILEGED;
               name = XATTR_PRIVILEGED_OVERRIDE_STAT;
             }
           else if (lo.xattr_permissions == 2)
             {
-              get_upper_layer (&lo)->has_stat_override = 1;
+              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_USER;
               name = XATTR_OVERRIDE_STAT;
             }
           else

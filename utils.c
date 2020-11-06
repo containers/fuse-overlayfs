@@ -240,10 +240,27 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
   cleanup_close int cleanup_fd = -1;
   const char *xattr_name;
 
-  if (l->has_stat_override == 0 && l->has_privileged_stat_override == 0)
-    return 0;
+  switch (l->stat_override_mode)
+    {
+    case STAT_OVERRIDE_NONE:
+      return 0;
 
-  xattr_name = l->has_privileged_stat_override ? XATTR_PRIVILEGED_OVERRIDE_STAT : XATTR_OVERRIDE_STAT;
+    case STAT_OVERRIDE_USER:
+      xattr_name = XATTR_OVERRIDE_STAT;
+      break;
+
+    case STAT_OVERRIDE_PRIVILEGED:
+      xattr_name = XATTR_PRIVILEGED_OVERRIDE_STAT;
+      break;
+
+    case STAT_OVERRIDE_CONTAINERS:
+      xattr_name = XATTR_OVERRIDE_CONTAINERS_STAT;
+      break;
+
+    default:
+      errno = EINVAL;
+      return -1;
+    }
 
   if (fd >= 0)
     {
