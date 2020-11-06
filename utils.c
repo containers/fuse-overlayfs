@@ -253,6 +253,10 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
       xattr_name = XATTR_PRIVILEGED_OVERRIDE_STAT;
       break;
 
+    case STAT_OVERRIDE_CONTAINERS:
+      xattr_name = XATTR_OVERRIDE_CONTAINERS_STAT;
+      break;
+
     default:
       errno = EINVAL;
       return -1;

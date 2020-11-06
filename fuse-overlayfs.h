@@ -109,6 +109,7 @@ enum stat_override_mode
   STAT_OVERRIDE_NONE,
   STAT_OVERRIDE_USER,
   STAT_OVERRIDE_PRIVILEGED,
+  STAT_OVERRIDE_CONTAINERS,
 };
 
 struct ovl_layer

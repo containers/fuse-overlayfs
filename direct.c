@@ -197,6 +197,8 @@ direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *pa
     l->stat_override_mode = STAT_OVERRIDE_PRIVILEGED;
   else if (fgetxattr (l->fd, XATTR_OVERRIDE_STAT, tmp, sizeof (tmp)) >= 0)
     l->stat_override_mode = STAT_OVERRIDE_USER;
+  else if (fgetxattr (l->fd, XATTR_OVERRIDE_CONTAINERS_STAT, tmp, sizeof (tmp)) >= 0)
+    l->stat_override_mode = STAT_OVERRIDE_CONTAINERS;
 
   return 0;
 }
