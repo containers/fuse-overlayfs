@@ -136,6 +136,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define XATTR_PREFIX "user.fuseoverlayfs."
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
+#define XATTR_CONTAINERS_PREFIX "user.containers."
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
@@ -3286,7 +3287,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
-  if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX))
+  if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX)  || has_prefix (name, XATTR_CONTAINERS_PREFIX))
     {
       fuse_reply_err (req, EPERM);
       return;
