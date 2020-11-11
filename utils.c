@@ -240,6 +240,16 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
   cleanup_close int cleanup_fd = -1;
   const char *xattr_name;
 
+  switch (st->st_mode & S_IFMT)
+    {
+    case S_IFDIR:
+    case S_IFREG:
+      break;
+
+    default:
+      return 0;
+    }
+
   switch (l->stat_override_mode)
     {
     case STAT_OVERRIDE_NONE:
