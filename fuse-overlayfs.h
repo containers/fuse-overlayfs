@@ -50,6 +50,7 @@ struct ovl_node
   Hash_table *inodes;
   struct ovl_ino *ino;
   struct ovl_node *next_link;
+  unsigned int in_readdir;
 
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;

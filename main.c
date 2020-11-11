@@ -2183,6 +2183,7 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       fi->cache_readdir = 1;
 #endif
     }
+  node->in_readdir++;
   fuse_reply_open (req, fi);
   return;
 
@@ -2395,6 +2396,7 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   size_t s;
   struct ovl_dirp *d = ovl_dirp (fi);
   struct ovl_data *lo = ovl_data (req);
+  struct ovl_node *node = NULL;
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_releasedir(ino=%" PRIu64 ")\n", ino);
@@ -2408,6 +2410,10 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
             node_free (d->tbl[s]);
         }
     }
+
+  node = do_lookup_file (lo, ino, NULL);
+  if (node)
+    node->in_readdir--;
 
   free (d->tbl);
   free (d);
@@ -3709,7 +3715,7 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
   cleanup_lock int l = enter_big_lock ();
   cleanup_close int fd = -1;
   struct fuse_entry_param e;
-  struct ovl_node *node = NULL;
+  struct ovl_node *p, *node = NULL;
   struct ovl_data *lo = ovl_data (req);
   struct stat st;
 
@@ -3734,6 +3740,11 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+
+  p = do_lookup_file (lo, parent, NULL);
+  /* Make sure the cache is invalidated, if the parent is in the middle of a readdir. */
+  if (p && p->in_readdir)
+    fuse_lowlevel_notify_inval_inode (lo->se, parent, 0, 0);
 
   if (node == NULL || do_getattr (req, &e, node, fd, NULL) < 0)
     {
@@ -4551,6 +4562,7 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
            fuse_ino_t newparent, const char *newname,
            unsigned int flags)
 {
+  struct ovl_node *p;
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
 
@@ -4567,6 +4579,14 @@ ovl_rename (fuse_req_t req, fuse_ino_t parent, const char *name,
     ovl_rename_exchange (req, parent, name, newparent, newname, flags);
   else
     ovl_rename_direct (req, parent, name, newparent, newname, flags);
+
+  /* Make sure the cache is invalidated, if the parent is in the middle of a readdir. */
+  p = do_lookup_file (lo, parent, NULL);
+  if (p && p->in_readdir)
+    fuse_lowlevel_notify_inval_inode (lo->se, parent, 0, 0);
+  p = do_lookup_file (lo, newparent, NULL);
+  if (p && p->in_readdir)
+    fuse_lowlevel_notify_inval_inode (lo->se, newparent, 0, 0);
 }
 
 static void
@@ -4784,6 +4804,10 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       fuse_reply_err (req, errno);
       return;
     }
+
+  /* Make sure the cache is invalidated, if the parent is in the middle of a readdir. */
+  if (pnode->in_readdir)
+    fuse_lowlevel_notify_inval_inode (lo->se, parent, 0, 0);
 
   e.ino = node_to_inode (node);
   e.attr_timeout = get_timeout (lo);
