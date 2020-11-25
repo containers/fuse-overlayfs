@@ -1,3 +1,13 @@
+* fuse-overlayfs-1.3
+
+- add squash_to_root mount option.
+- honor option "volatile".
+- when writing mode to xattr, create files with mode 0755.
+- support ID mapping when using xattr permissions.
+- allow opening not accessible but still referenced files.
+- invalidate directory cache on create/rename.
+
+
 * fuse-overlayfs-1.2
 
 - fix segfault if no mountpoint specified
