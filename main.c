@@ -3859,6 +3859,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
     {
       mode_t mode = node->ino->mode;
       int dirfd = node_dirfd (node);
+      bool need_restore_mode = false;
 
       if (mode == 0)
         {
@@ -3871,6 +3872,20 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
               return;
             }
           node->ino->mode = mode = st.st_mode;
+        }
+      ret = faccessat(dirfd, node->path, R_OK|W_OK, AT_SYMLINK_NOFOLLOW);
+      if (ret < 0)
+        {
+          if (errno == EACCES)
+            {
+              need_restore_mode = true;
+              ret = fchmodat(dirfd, node->path, node->ino->mode | S_IRUSR | S_IWUSR, 0);
+            }
+          if (ret < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
         }
 
       switch (mode & S_IFMT)
@@ -3909,6 +3924,15 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
         default:
           strconcat3 (path, PATH_MAX, get_upper_layer (lo)->path, "/", node->path);
           break;
+        }
+      if (need_restore_mode)
+        {
+          ret = fchmodat(dirfd, node->path, node->ino->mode, 0);
+          if (ret < 0)
+            {
+              fuse_reply_err (req, errno);
+              return;
+            }
         }
     }
 
