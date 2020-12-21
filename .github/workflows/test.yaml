@@ -1,0 +1,100 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  build_job:
+    runs-on: ubuntu-20.04
+    name: Build on ${{ matrix.arch }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: armv7
+            distro: ubuntu20.04
+          - arch: aarch64
+            distro: ubuntu20.04
+          - arch: s390x
+            distro: ubuntu20.04
+          - arch: ppc64le
+            distro: ubuntu20.04
+    steps:
+      - uses: actions/checkout@v2.1.0
+      - uses: uraimo/run-on-arch-action@v2.0.5
+        name: Build
+        id: build
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+
+          githubToken: ${{ github.token }}
+
+          setup: |
+            git submodule update --init --recursive
+
+          install: |
+            apt-get update -q -y
+            apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3.8 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel libfuse3-dev bats
+
+          run: |
+            ./autogen.sh
+            ./configure
+            make -j $(nproc)
+
+  Test:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - test: no-ovl-whiteouts
+          - test: ovl-whiteouts
+    env:
+      GOPATH: /root/go
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v2
+
+    - name: install dependencies
+      run: |
+            sudo apt-get update -q -y
+            sudo apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3.8 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel wget libfuse3-dev bats
+
+            sudo mkdir -p /lower /upper /mnt
+            sudo sh -c "(cd /; git clone https://github.com/amir73il/unionmount-testsuite.git)"
+            sudo go get github.com/containers/storage
+            sudo GOPATH=$GOPATH sh -c "(cd /root/go/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := exclude_graphdriver_devicemapper exclude_graphdriver_btrfs|' Makefile; make GO111MODULE=on containers-storage)"
+
+    - name: run autogen.sh
+      run: |
+        ./autogen.sh
+
+    - name: run configure
+      run: |
+        ./configure
+
+    - name: build and install
+      run: |
+        make -j $(nproc)
+        sudo make -j install
+        sudo cp fuse-overlayfs /sbin
+
+    - name: run test
+      run: |
+        case "${{ matrix.test }}" in
+            ovl-whiteouts)
+                sudo sh -c "(cd /unionmount-testsuite; unshare -m ./run --ov --fuse=fuse-overlayfs --xdev)"
+                sudo tests/fedora-installs.sh
+                sudo tests/unlink.sh
+                sudo tests/alpine.sh
+                sudo sh -c "(cd /root/go/src/github.com/containers/storage/tests; JOBS=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash)"
+            ;;
+            no-ovl-whiteouts)
+                sudo sh -c "(cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 unshare -m ./run --ov --fuse=fuse-overlayfs --xdev)"
+                sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/fedora-installs.sh
+                sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/unlink.sh
+                sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/alpine.sh
+                sudo sh -c "(cd /root/go/src/github.com/containers/storage/tests; JOBS=1 FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash)"
+            ;;
+        esac
