@@ -221,6 +221,10 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, xattr_permissions), 0},
   {"squash_to_root",
    offsetof (struct ovl_data, squash_to_root), 1},
+  {"squash_to_uid=%d",
+   offsetof (struct ovl_data, squash_to_uid), 1},
+  {"squash_to_gid=%d",
+   offsetof (struct ovl_data, squash_to_gid), 1},
   {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
    offsetof (struct ovl_data, fsync), 0},
   FUSE_OPT_END
@@ -535,7 +539,7 @@ do_fchown (struct ovl_data *lo, int fd, uid_t uid, gid_t gid, mode_t mode)
     ret = write_permission_xattr (lo, fd, NULL, uid, gid, mode);
   else
     ret = fchown (fd, uid, gid);
-  return (lo->squash_to_root ? 0 : ret);
+  return (lo->squash_to_root || lo->squash_to_uid != -1 || lo->squash_to_gid != -1) ? 0 : ret;
 }
 /* Make sure it is not used anymore.  */
 #define fchown ERROR
@@ -548,7 +552,7 @@ do_chown (struct ovl_data *lo, const char *path, uid_t uid, gid_t gid, mode_t mo
     ret = write_permission_xattr (lo, -1, path, uid, gid, mode);
   else
     ret = chown (path, uid, gid);
-  return (lo->squash_to_root ? 0 : ret);
+  return (lo->squash_to_root || lo->squash_to_uid != -1 || lo->squash_to_gid != -1) ? 0 : ret;
 }
 /* Make sure it is not used anymore.  */
 #define chown ERROR
@@ -569,7 +573,7 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
     }
   else
     ret = fchownat (dfd, path, uid, gid, flags);
-  return (lo->squash_to_root ? 0 : ret);
+  return (lo->squash_to_root || lo->squash_to_uid != -1 || lo->squash_to_gid != -1) ? 0 : ret;
 }
 /* Make sure it is not used anymore.  */
 #define fchownat ERROR
@@ -812,6 +816,10 @@ find_mapping (unsigned int id, const struct ovl_data *data,
   const struct ovl_mapping *mapping = (uid ? data->uid_mappings
                                        : data->gid_mappings);
 
+  if (direct && uid && data->squash_to_uid != -1)
+    return data->squash_to_uid;
+  if (direct && !uid && data->squash_to_gid != -1)
+    return data->squash_to_gid;
   if (direct && data->squash_to_root)
     return 0;
 
@@ -5424,6 +5432,8 @@ main (int argc, char *argv[])
                         .redirect_dir = NULL,
                         .mountpoint = NULL,
                         .fsync = 1,
+                        .squash_to_uid = -1,
+                        .squash_to_gid = -1,
                         .xattr_permissions = 0,
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,

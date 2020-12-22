@@ -97,6 +97,8 @@ struct ovl_data
   int disable_xattrs;
   int xattr_permissions;
   int squash_to_root;
+  int squash_to_uid;
+  int squash_to_gid;
 
   /* current uid/gid*/
   uid_t uid;
