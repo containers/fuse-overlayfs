@@ -84,6 +84,15 @@ $ stat -c %u:%g merged/a merged/b
 
 Those are the same IDs visible from outside the user namespace.
 
+**-o squash_to_root**
+Every file and directory is owned by the root user (0:0).
+
+**-o squash_to_uid=uid**
+**-o squash_to_gid=gid**
+Every file and directory is owned by the specified uid or gid.
+
+It has higher precedence over **squash_to_root**.
+
 # SEE ALSO
 
 **fuse**(8), **mount**(8), **user_namespaces**(7)

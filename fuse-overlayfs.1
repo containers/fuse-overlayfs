@@ -43,6 +43,11 @@ A directory used internally by fuse\-overlays, must be on the same file
 system as the upper dir.
 
 .PP
+\fB\-o workdir=workdir\fP
+A directory used internally by fuse\-overlays, must be on the same file
+system as the upper dir.
+
+.PP
 \fB\-o uidmapping=UID:MAPPED\-UID:LEN[,UID2:MAPPED\-UID2:LEN2]\fP
 \fB\-o gidmapping=GID:MAPPED\-GID:LEN[,GID2:MAPPED\-GID2:LEN2]\fP
 Specifies the dynamic UID/GID mapping used by fuse\-overlayfs when
@@ -98,6 +103,18 @@ $ stat \-c %u:%g merged/a merged/b
 
 .PP
 Those are the same IDs visible from outside the user namespace.
+
+.PP
+\fB\-o squash\_to\_root\fP
+Every file and directory is owned by the root user (0:0).
+
+.PP
+\fB\-o squash\_to\_uid=uid\fP
+\fB\-o squash\_to\_gid=gid\fP
+Every file and directory is owned by the specified uid or gid.
+
+.PP
+It has higher precedence over \fBsquash\_to\_root\fP\&.
 
 
 .SH SEE ALSO
