@@ -733,6 +733,21 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
       if (ret == 0)
         return 0;
 
+      if (errno == EEXIST)
+        {
+          int saved_errno = errno;
+          struct stat st;
+
+          /* Check whether it is already a whiteout.  */
+          if (TEMP_FAILURE_RETRY (fstatat (get_upper_layer (lo)->fd, whiteout_path, &st, AT_SYMLINK_NOFOLLOW)) == 0
+              && (st.st_mode & S_IFMT) == S_IFCHR
+              && major (st.st_rdev) == 0
+              && minor (st.st_rdev) == 0)
+            return 0;
+
+          errno = saved_errno;
+        }
+
       if (errno != EPERM && errno != ENOTSUP)
         return -1;
 
