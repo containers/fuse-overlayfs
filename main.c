@@ -757,7 +757,6 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
 
   strconcat3 (whiteout_wh_path, PATH_MAX, parent->path, "/.wh.", name);
 
-
   fd = get_upper_layer (lo)->ds->openat (get_upper_layer (lo), whiteout_wh_path, O_CREAT|O_WRONLY|O_NONBLOCK, 0700);
   if (fd < 0 && errno != EEXIST)
     return -1;
@@ -4532,6 +4531,9 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
      rename+mknod separately.  */
   ret = direct_renameat2 (srcfd, name, destfd,
                           newname, flags|RENAME_WHITEOUT);
+  /* If the destination is a whiteout, just overwrite it.  */
+  if (ret < 0 && errno == EEXIST)
+    ret = direct_renameat2 (srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
   if (ret < 0)
     {
       ret = direct_renameat2 (srcfd, name, destfd,
