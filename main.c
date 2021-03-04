@@ -1398,7 +1398,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
 
   ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
-      return NULL;
+    return NULL;
 
   ret->parent = parent;
   ret->layer = layer;
@@ -5423,7 +5423,11 @@ load_default_plugins ()
       if (dent->d_type != DT_DIR)
         {
           char *new_plugins = NULL;
-          asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins);
+          if (asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins) < 0)
+            {
+              free (plugins);
+              return NULL;
+            }
           free (plugins);
           plugins = new_plugins;
         }
