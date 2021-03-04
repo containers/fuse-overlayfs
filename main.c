@@ -5021,7 +5021,7 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
     }
 
   if (fd < 0)
-    strcpy (path, node->path);
+    strncpy (path, node->path, PATH_MAX);
 
   if (! do_fsync)
     {
