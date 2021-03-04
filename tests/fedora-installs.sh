@@ -207,7 +207,7 @@ sleep_pid=$!
 rm merged/toremove
 grep 12345 /proc/$sleep_pid/fd/0
 
-RUN touch merged/a merged/b
-RUN chmod 6 merged/a
-RUN mv merged/a merged/x
-RUN mv merged/b merged/a
+touch merged/a merged/b
+chmod 6 merged/a
+mv merged/a merged/x
+mv merged/b merged/a

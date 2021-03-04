@@ -179,7 +179,7 @@ print_stats (int sig)
   char fmt[128];
   int l = snprintf (fmt, sizeof (fmt) - 1, "# INODES: %zu\n# NODES: %zu\n", stats.inodes, stats.nodes);
   fmt[l] = '\0';
-  write (STDERR_FILENO, fmt, l + 1);
+  (void) write (STDERR_FILENO, fmt, l + 1);
 }
 
 static double
@@ -1398,7 +1398,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
 
   ret = calloc (1, sizeof (*ret));
   if (ret == NULL)
-      return NULL;
+    return NULL;
 
   ret->parent = parent;
   ret->layer = layer;
@@ -1562,7 +1562,6 @@ static struct ovl_node *
 insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
 {
   struct ovl_node *old = NULL, *prev_parent = item->parent;
-  int is_dir = node_dirp (item);
   int ret;
 
   if (prev_parent)
@@ -5022,7 +5021,7 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
     }
 
   if (fd < 0)
-    strcpy (path, node->path);
+    strncpy (path, node->path, PATH_MAX);
 
   if (! do_fsync)
     {
@@ -5423,7 +5422,11 @@ load_default_plugins ()
       if (dent->d_type != DT_DIR)
         {
           char *new_plugins = NULL;
-          asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins);
+          if (asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins) < 0)
+            {
+              free (plugins);
+              return NULL;
+            }
           free (plugins);
           plugins = new_plugins;
         }
