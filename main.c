@@ -1562,7 +1562,6 @@ static struct ovl_node *
 insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
 {
   struct ovl_node *old = NULL, *prev_parent = item->parent;
-  int is_dir = node_dirp (item);
   int ret;
 
   if (prev_parent)
