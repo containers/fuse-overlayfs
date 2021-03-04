@@ -179,7 +179,7 @@ print_stats (int sig)
   char fmt[128];
   int l = snprintf (fmt, sizeof (fmt) - 1, "# INODES: %zu\n# NODES: %zu\n", stats.inodes, stats.nodes);
   fmt[l] = '\0';
-  write (STDERR_FILENO, fmt, l + 1);
+  (void) write (STDERR_FILENO, fmt, l + 1);
 }
 
 static double
