@@ -4532,9 +4532,17 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   /* Try to create the whiteout atomically, if it fails do the
      rename+mknod separately.  */
-  ret = direct_renameat2 (srcfd, name, destfd,
-                          newname, flags|RENAME_WHITEOUT);
-  /* If the destination is a whiteout, just overwrite it.  */
+  if (! can_mknod)
+    {
+      ret = -1;
+      errno = EPERM;
+    }
+  else
+    {
+      ret = direct_renameat2 (srcfd, name, destfd,
+                              newname, flags|RENAME_WHITEOUT);
+    }
+      /* If the destination is a whiteout, just overwrite it.  */
   if (ret < 0 && errno == EEXIST)
     ret = direct_renameat2 (srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
   if (ret < 0)
