@@ -158,8 +158,6 @@ struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 };
 #endif
 
-static bool disable_ovl_whiteout;
-
 static uid_t overflow_uid;
 static gid_t overflow_gid;
 
@@ -289,6 +287,12 @@ check_can_mknod (struct ovl_data *lo)
 {
   int ret;
   char path[PATH_MAX];
+
+  if (getenv ("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT"))
+    {
+      can_mknod = false;
+      return;
+    }
 
   sprintf (path, "%lu", get_next_wd_counter ());
 
@@ -723,7 +727,7 @@ create_whiteout (struct ovl_data *lo, struct ovl_node *parent, const char *name,
         return 0;
     }
 
-  if (!disable_ovl_whiteout && !skip_mknod && can_mknod)
+  if (!skip_mknod && can_mknod)
     {
       char whiteout_path[PATH_MAX];
 
@@ -4528,9 +4532,17 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   /* Try to create the whiteout atomically, if it fails do the
      rename+mknod separately.  */
-  ret = direct_renameat2 (srcfd, name, destfd,
-                          newname, flags|RENAME_WHITEOUT);
-  /* If the destination is a whiteout, just overwrite it.  */
+  if (! can_mknod)
+    {
+      ret = -1;
+      errno = EPERM;
+    }
+  else
+    {
+      ret = direct_renameat2 (srcfd, name, destfd,
+                              newname, flags|RENAME_WHITEOUT);
+    }
+      /* If the destination is a whiteout, just overwrite it.  */
   if (ret < 0 && errno == EEXIST)
     ret = direct_renameat2 (srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
   if (ret < 0)
@@ -4543,6 +4555,8 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       ret = create_whiteout (lo, pnode, name, false, true);
       if (ret < 0)
         goto error;
+
+      pnode->loaded = 0;
     }
 
   if (delete_whiteout (lo, destfd, NULL, newname) < 0)
@@ -5467,9 +5481,6 @@ main (int argc, char *argv[])
   cleanup_layer struct ovl_layer *layers = NULL;
   struct ovl_layer *tmp_layer = NULL;
   struct fuse_args args = FUSE_ARGS_INIT (argc, newargv);
-
-  if (getenv ("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT"))
-    disable_ovl_whiteout = true;
 
   memset (&opts, 0, sizeof (opts));
   if (fuse_opt_parse (&args, &lo, ovl_opts, fuse_opt_proc) == -1)
