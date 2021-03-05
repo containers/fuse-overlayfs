@@ -211,3 +211,20 @@ touch merged/a merged/b
 chmod 6 merged/a
 mv merged/a merged/x
 mv merged/b merged/a
+
+# https://github.com/containers/fuse-overlayfs/issues/279
+umount -l merged
+
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+mkdir lower/test
+touch lower/test/a.txt
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+(cd merged/test; touch a.txt; mv a.txt a2.txt; touch a3.txt; ln -s a3.txt a.txt)
+
+if test -e upperdir/test/.wh.a.txt; then
+   echo "whiteout file still exists" >&2
+   exit 1
+fi

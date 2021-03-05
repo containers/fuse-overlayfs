@@ -4555,6 +4555,8 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       ret = create_whiteout (lo, pnode, name, false, true);
       if (ret < 0)
         goto error;
+
+      pnode->loaded = 0;
     }
 
   if (delete_whiteout (lo, destfd, NULL, newname) < 0)
