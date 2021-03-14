@@ -99,6 +99,7 @@ struct ovl_data
   int squash_to_root;
   int squash_to_uid;
   int squash_to_gid;
+  int static_nlink;
 
   /* current uid/gid*/
   uid_t uid;

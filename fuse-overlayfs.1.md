@@ -93,6 +93,14 @@ Every file and directory is owned by the specified uid or gid.
 
 It has higher precedence over **squash_to_root**.
 
+**-o static_nlink**
+Set st_nlink to the static value 1 for all directories.
+
+This can be useful for higher latency file systems such as NFS, where
+counting the number of hard links for a directory with many files can
+be a slow operation. With this option enabled, the number of hard
+links reported when running stat for any directory is 1.
+
 # SEE ALSO
 
 **fuse**(8), **mount**(8), **user_namespaces**(7)

@@ -116,6 +116,16 @@ Every file and directory is owned by the specified uid or gid.
 .PP
 It has higher precedence over \fBsquash\_to\_root\fP\&.
 
+.PP
+\fB\-o static\_nlink\fP
+Set st\_nlink to the static value 1 for all directories.
+
+.PP
+This can be useful for higher latency file systems such as NFS, where
+counting the number of hard links for a directory with many files can
+be a slow operation. With this option enabled, the number of hard
+links reported when running stat for any directory is 1.
+
 
 .SH SEE ALSO
 .PP
