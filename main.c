@@ -223,6 +223,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, squash_to_uid), 1},
   {"squash_to_gid=%d",
    offsetof (struct ovl_data, squash_to_gid), 1},
+  {"static_nlink",
+   offsetof (struct ovl_data, static_nlink), 1},
   {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
    offsetof (struct ovl_data, fsync), 0},
   FUSE_OPT_END
@@ -899,15 +901,20 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
   st->st_dev = node->tmp_dev;
   if (ret == 0 && node_dirp (node))
     {
-      struct ovl_node *it;
-
-      st->st_nlink = 2;
-
-      for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+      if (!data->static_nlink)
         {
-          if (node_dirp (it))
-            st->st_nlink++;
+          struct ovl_node *it;
+
+          st->st_nlink = 2;
+
+          for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+            {
+              if (node_dirp (it))
+                st->st_nlink++;
+            }
         }
+      else
+        st->st_nlink = 1;
     }
 
   return ret;
@@ -2105,7 +2112,7 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
       return;
     }
 
-  if (node_dirp (node))
+  if (!lo->static_nlink && node_dirp (node))
     {
       node = reload_dir (lo, node);
       if (node == NULL)
@@ -2355,7 +2362,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
           }
         else
           {
-            if (node_dirp (node))
+            if (!lo->static_nlink && node_dirp (node))
               {
                 node = reload_dir (lo, node);
                 if (node == NULL)
@@ -2364,7 +2371,6 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
                     return;
                   }
               }
-
             memset (&e, 0, sizeof (e));
             ret = rpl_stat (req, node, -1, NULL, NULL, st);
             if (ret < 0)
@@ -5468,6 +5474,7 @@ main (int argc, char *argv[])
                         .fsync = 1,
                         .squash_to_uid = -1,
                         .squash_to_gid = -1,
+                        .static_nlink = 0,
                         .xattr_permissions = 0,
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
