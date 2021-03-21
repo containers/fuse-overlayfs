@@ -1373,9 +1373,10 @@ safe_read_xattr (char **ret, int sfd, const char *name, size_t initial_size)
       char *tmp;
 
       s = fgetxattr (sfd, name, buffer, current_size);
-      if (s < 0)
+      if (s >= 0 && s < current_size)
         break;
-      if (s < current_size)
+
+      if (s < 0 && errno != ERANGE)
         break;
 
       current_size *= 2;
