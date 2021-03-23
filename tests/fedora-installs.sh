@@ -70,6 +70,9 @@ umount merged
 
 touch lower/file-lower-layer
 
+# set a "big" xattr
+setfattr -n user.big-xattr -v "$(seq 1000 | tr -d '\n')" lower/file-lower-layer
+
 # no upper layer
 fuse-overlayfs -o lowerdir=lower merged
 
