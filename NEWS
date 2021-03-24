@@ -1,3 +1,12 @@
+* fuse-overlayfs-1.5
+
+- honor FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT also for renames
+- use strncpy instead of strcpy
+- fix renameat2(RENAME_NOREPLACE) on older kernels that lack
+  device whiteouts for unprivileged users.
+- fix creating a symlink on top of a removed file.
+- fix copyup of xattrs longer than 256 bytes.
+
 * fuse-overlayfs-1.4
 
 - add squash_to_uid and squash_to_gid
