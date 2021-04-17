@@ -4426,8 +4426,8 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_data *lo = ovl_data (req);
   int ret;
   int saved_errno;
-  int srcfd = -1;
-  int destfd = -1;
+  cleanup_close int srcfd = -1;
+  cleanup_close int destfd = -1;
   struct ovl_node key;
   bool destnode_is_whiteout = false;
 
@@ -4612,20 +4612,12 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   node->loaded = 0;
 
   ret = 0;
-  goto cleanup;
+  fuse_reply_err (req, 0);
+  return;
 
  error:
   ret = -1;
-
- cleanup:
-  saved_errno = errno;
-  if (srcfd >= 0)
-    close (srcfd);
-  if (destfd >= 0)
-    close (destfd);
-  errno = saved_errno;
-
-  fuse_reply_err (req, ret == 0 ? 0 : errno);
+  fuse_reply_err (req, errno);
 }
 
 static void
