@@ -2152,13 +2152,47 @@ ovl_dirp (struct fuse_file_info *fi)
   return (struct ovl_dirp *) (uintptr_t) fi->fh;
 }
 
+static int
+reload_tbl (struct ovl_data *lo, struct ovl_dirp *d, struct ovl_node *node)
+{
+  size_t counter = 0;
+  struct ovl_node *it;
+
+  node = reload_dir (lo, node);
+  if (node == NULL)
+    return -1;
+
+  if (d->tbl)
+    free (d->tbl);
+
+  d->offset = 0;
+  d->parent = node;
+  d->tbl_size = hash_get_n_entries (node->children) + 2;
+  d->tbl = calloc (sizeof (struct ovl_node *), d->tbl_size);
+  if (d->tbl == NULL)
+    {
+      errno = ENOMEM;
+      return -1;
+    }
+
+  d->tbl[counter++] = node;
+  d->tbl[counter++] = node->parent;
+
+  for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
+    {
+      it->ino->lookups++;
+      it->node_lookups++;
+      d->tbl[counter++] = it;
+    }
+
+  return 0;
+}
+
 static void
 ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-  size_t counter = 0;
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
-  struct ovl_node *it;
   struct ovl_dirp *d = calloc (1, sizeof (struct ovl_dirp));
   cleanup_lock int l = enter_big_lock ();
 
@@ -2184,29 +2218,7 @@ ovl_opendir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
       goto out_errno;
     }
 
-  node = reload_dir (lo, node);
-  if (node == NULL)
-    goto out_errno;
-
-  d->offset = 0;
   d->parent = node;
-  d->tbl_size = hash_get_n_entries (node->children) + 2;
-  d->tbl = malloc (sizeof (struct ovl_node *) * d->tbl_size);
-  if (d->tbl == NULL)
-    {
-      errno = ENOMEM;
-      goto out_errno;
-    }
-
-  d->tbl[counter++] = node;
-  d->tbl[counter++] = node->parent;
-
-  for (it = hash_get_first (node->children); it; it = hash_get_next (node->children, it))
-    {
-      it->ino->lookups++;
-      it->node_lookups++;
-      d->tbl[counter++] = it;
-    }
 
   fi->fh = (uintptr_t) d;
   if (get_timeout (lo) > 0)
@@ -2326,6 +2338,16 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
       fuse_reply_err (req, errno);
       return;
     }
+
+  if (offset == 0 || d->tbl == NULL)
+    {
+      if (reload_tbl (lo, d, d->parent) < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+    }
+
   p = buffer;
   for (; remaining > 0 && offset < d->tbl_size; offset++)
       {
