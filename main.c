@@ -5033,7 +5033,6 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_lock int l = 0;
-  char path[PATH_MAX];
 
   if (!lo->fsync)
     {
@@ -5059,9 +5058,6 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
       return;
     }
 
-  if (fd < 0)
-    strncpy (path, node->path, PATH_MAX);
-
   if (! do_fsync)
     {
       fuse_reply_err (req, 0);
@@ -5069,7 +5065,7 @@ do_fsync (fuse_req_t req, fuse_ino_t ino, int datasync, int fd)
     }
 
   if (do_fsync)
-    ret = direct_fsync (node->layer, fd, path, datasync);
+    ret = direct_fsync (node->layer, fd, node->path, datasync);
 
   fuse_reply_err (req, ret == 0 ? 0 : errno);
 }
