@@ -5464,6 +5464,7 @@ load_default_plugins ()
           if (asprintf (&new_plugins, "%s/%s:%s", PKGLIBEXECDIR, dent->d_name, plugins) < 0)
             {
               free (plugins);
+              closedir (dp);
               return NULL;
             }
           free (plugins);
