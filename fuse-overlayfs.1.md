@@ -35,10 +35,6 @@ done to the file system will be written.
 A directory used internally by fuse-overlays, must be on the same file
 system as the upper dir.
 
-**-o workdir=workdir**
-A directory used internally by fuse-overlays, must be on the same file
-system as the upper dir.
-
 **-o uidmapping=UID:MAPPED-UID:LEN[,UID2:MAPPED-UID2:LEN2]**
 **-o gidmapping=GID:MAPPED-GID:LEN[,GID2:MAPPED-GID2:LEN2]**
 Specifies the dynamic UID/GID mapping used by fuse-overlayfs when
