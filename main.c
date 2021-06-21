@@ -944,7 +944,7 @@ node_free (void *p)
 
   if (n->parent)
     {
-      if (hash_lookup (n->parent->children, n) == n)
+      if (n->parent->children && hash_lookup (n->parent->children, n) == n)
         hash_delete (n->parent->children, n);
       n->parent->loaded = 0;
       n->parent = NULL;
