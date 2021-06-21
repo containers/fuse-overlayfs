@@ -2474,6 +2474,32 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   fuse_reply_err (req, 0);
 }
 
+/* in-place filter xattrs that cannot be accessed.  */
+static ssize_t
+filter_xattrs_list (char *buf, ssize_t len)
+{
+  size_t i;
+  ssize_t ret = len;
+
+  for (i = 0; buf && i < ret;)
+    {
+      size_t current_len;
+      const char *cur_attr = buf + i;
+      ssize_t remaining = len - i;
+
+      current_len = strlen (cur_attr) + 1;
+      if (can_access_xattr (cur_attr))
+        i += current_len;
+      else
+        {
+          memmove (buf + i, cur_attr + current_len, remaining - current_len);
+          ret -= current_len;
+        }
+    }
+
+  return len;
+}
+
 static void
 ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
 {
@@ -2525,22 +2551,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
-  len = ret;
-
-  for (i = 0; buf && i < len;)
-    {
-      size_t current_len;
-      const char *cur_attr = buf + i;
-
-      current_len = strlen (cur_attr) + 1;
-      if (can_access_xattr (cur_attr))
-        i += current_len;
-      else
-        {
-          memmove (buf + i, cur_attr + current_len, len - current_len);
-          len -= current_len;
-        }
-    }
+  len = filter_xattrs_list (buf, ret);
 
   if (size == 0)
     fuse_reply_xattr (req, len);
