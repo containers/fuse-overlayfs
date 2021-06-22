@@ -64,7 +64,6 @@ jobs:
             sudo mkdir -p /lower /upper /mnt
             sudo sh -c "(cd /; git clone https://github.com/amir73il/unionmount-testsuite.git)"
             sudo go get github.com/containers/storage
-            sudo GOPATH=$GOPATH sh -c "(cd /root/go/src/github.com/containers/storage; make tests/tools/build/ffjson; cp tests/tools/build/ffjson /usr/bin)"
             sudo GOPATH=$GOPATH sh -c "(cd /root/go/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := exclude_graphdriver_devicemapper exclude_graphdriver_btrfs|' Makefile; make GO111MODULE=on containers-storage)"
 
     - name: run autogen.sh

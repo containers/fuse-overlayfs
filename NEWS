@@ -1,3 +1,8 @@
+* fuse-overlayfs-1.6
+
+- fix an invalid access when filtering internal xattrs that could
+  deal to a segfault.
+
 * fuse-overlayfs-1.5
 
 - honor FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT also for renames
