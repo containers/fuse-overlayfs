@@ -427,7 +427,7 @@ ovl_init (void *userdata, struct fuse_conn_info *conn)
   if ((conn->capable & FUSE_CAP_WRITEBACK_CACHE) == 0)
     lo->writeback = 0;
 
-  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
+  conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE | FUSE_CAP_POSIX_ACL;
   if (lo->writeback)
     conn->want |= FUSE_CAP_WRITEBACK_CACHE;
 }
