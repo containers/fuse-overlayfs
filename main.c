@@ -2479,7 +2479,6 @@ static ssize_t
 filter_xattrs_list (char *buf, ssize_t len)
 {
   ssize_t ret = 0;
-  size_t i = 0;
   char *it;
 
   if (buf == NULL)
@@ -2518,7 +2517,6 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
   cleanup_free char *buf = NULL;
-  size_t i;
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -4446,7 +4444,6 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_node *pnode, *node, *destnode, *destpnode;
   struct ovl_data *lo = ovl_data (req);
   int ret;
-  int saved_errno;
   cleanup_close int srcfd = -1;
   cleanup_close int destfd = -1;
   struct ovl_node key;
