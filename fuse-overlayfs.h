@@ -105,6 +105,9 @@ struct ovl_data
   uid_t uid;
   uid_t gid;
 
+  /* process euid. */
+  uid_t euid;
+
   struct ovl_plugin_context *plugins_ctx;
 };
 
