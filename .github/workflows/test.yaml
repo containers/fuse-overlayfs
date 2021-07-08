@@ -89,6 +89,7 @@ jobs:
                 sudo tests/unlink.sh
                 sudo tests/alpine.sh
                 sudo sh -c "(cd /root/go/src/github.com/containers/storage/tests; JOBS=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash)"
+                tests/unpriv.sh
             ;;
             no-ovl-whiteouts)
                 sudo sh -c "(cd /unionmount-testsuite; FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 unshare -m ./run --ov --fuse=fuse-overlayfs --xdev)"
@@ -96,5 +97,6 @@ jobs:
                 sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/unlink.sh
                 sudo FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/alpine.sh
                 sudo sh -c "(cd /root/go/src/github.com/containers/storage/tests; JOBS=1 FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 STORAGE_OPTION=overlay.mount_program=/sbin/fuse-overlayfs STORAGE_DRIVER=overlay unshare -m ./test_runner.bash)"
+                FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 tests/unpriv.sh
             ;;
         esac

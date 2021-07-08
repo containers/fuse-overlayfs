@@ -2972,6 +2972,8 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   mode = st.st_mode;
   if (lo->xattr_permissions)
     mode |= 0755;
+  if (lo->euid > 0)
+    mode |= 0200;
 
   if ((mode & S_IFMT) == S_IFDIR)
     {
@@ -5510,6 +5512,7 @@ main (int argc, char *argv[])
                         .squash_to_gid = -1,
                         .static_nlink = 0,
                         .xattr_permissions = 0,
+                        .euid = geteuid (),
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
                         .writeback = 1,
