@@ -231,3 +231,20 @@ if test -e upperdir/test/.wh.a.txt; then
    echo "whiteout file still exists" >&2
    exit 1
 fi
+
+# https://github.com/containers/fuse-overlayfs/issues/306
+umount -l merged
+
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+
+mkdir -p lower/a/b
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+rm -rf merged/a
+mkdir -p merged/a/b
+rm -rf merged/a/b
+test \! -e upper/a/b
+
+umount merged
+

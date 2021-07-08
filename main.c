@@ -1065,6 +1065,10 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
             needs_whiteout = true;
         }
 
+      // if the parent directory is opaque, there's no need to put a whiteout in it.
+      if (node->parent != NULL)
+        needs_whiteout = needs_whiteout && (is_directory_opaque(get_upper_layer(lo), node->parent->path) < 1);
+
       if (needs_whiteout)
         {
           /* If the atomic rename+mknod failed, then fallback into doing it in two steps.  */
