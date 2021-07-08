@@ -4,20 +4,20 @@ on: [push, pull_request]
 
 jobs:
   build_job:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.10
     name: Build on ${{ matrix.arch }}
 
     strategy:
       matrix:
         include:
           - arch: armv7
-            distro: ubuntu20.04
+            distro: ubuntu20.10
           - arch: aarch64
-            distro: ubuntu20.04
+            distro: ubuntu20.10
           - arch: s390x
-            distro: ubuntu20.04
+            distro: ubuntu20.10
           - arch: ppc64le
-            distro: ubuntu20.04
+            distro: ubuntu20.10
     steps:
       - uses: actions/checkout@v2.1.0
       - uses: uraimo/run-on-arch-action@v2.0.5
@@ -42,7 +42,7 @@ jobs:
             make -j $(nproc)
 
   Test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.10
     strategy:
       fail-fast: false
       matrix:
