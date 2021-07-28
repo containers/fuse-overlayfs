@@ -246,5 +246,8 @@ mkdir -p merged/a/b
 rm -rf merged/a/b
 test \! -e upper/a/b
 
+mknod merged/dev-foo c 10 175
+attr -l merged/dev-foo
+
 umount merged
 
