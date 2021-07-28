@@ -204,8 +204,9 @@ fi
 touch merged/$(printf %${merged_max_filename_len}s | tr ' ' A})
 
 # If a file is removed but referenced, we must still be able to access it.
-echo 12345 > merged/toremove
-sleep 30 < merged/toremove &
+echo 12345 | tee merged/toremove
+cat merged/toremove
+sleep 90 < merged/toremove &
 sleep_pid=$!
 rm merged/toremove
 grep 12345 /proc/$sleep_pid/fd/0
@@ -245,6 +246,9 @@ rm -rf merged/a
 mkdir -p merged/a/b
 rm -rf merged/a/b
 test \! -e upper/a/b
+
+mknod merged/dev-foo c 10 175
+attr -l merged/dev-foo
 
 umount merged
 
