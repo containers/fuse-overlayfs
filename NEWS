@@ -1,3 +1,10 @@
+* fuse-overlayfs-1.7
+
+- fix read xattrs for device files
+- don't create whiteout files in opaque dirs.
+- fix reading files when running with euid != 0.
+- enable POSIX ACLs.
+
 * fuse-overlayfs-1.6
 
 - fix an invalid access when filtering internal xattrs that could
