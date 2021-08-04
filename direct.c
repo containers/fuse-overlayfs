@@ -68,8 +68,7 @@ direct_fstat (struct ovl_layer *l, int fd, const char *path, unsigned int mask, 
   struct statx stx;
 
   ret = statx (fd, "", AT_STATX_DONT_SYNC|AT_EMPTY_PATH, mask, &stx);
-
-  if (ret < 0 && errno == ENOSYS)
+  if (ret < 0 && (errno == ENOSYS || errno == EINVAL))
     goto fallback;
   if (ret == 0)
     {
@@ -96,8 +95,7 @@ direct_statat (struct ovl_layer *l, const char *path, struct stat *st, int flags
   struct statx stx;
 
   ret = statx (l->fd, path, AT_STATX_DONT_SYNC|flags, mask, &stx);
-
-  if (ret < 0 && errno == ENOSYS)
+  if (ret < 0 && (errno == ENOSYS || errno == EINVAL))
     goto fallback;
   if (ret == 0)
     {
