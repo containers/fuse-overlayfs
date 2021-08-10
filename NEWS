@@ -1,3 +1,9 @@
+* fuse-overlayfs-1.7.1
+
+- set FUSE_CAP_POSIX_ACL only when it is supported by FUSE.
+- treat statx failure with EINVAL as ENOSYS, so that the fallback
+  is attempted.
+
 * fuse-overlayfs-1.7
 
 - fix read xattrs for device files
