@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([fuse-overlayfs], [1.7.1], [giuseppe@scrivano.org])
+AC_INIT([fuse-overlayfs], [1.8-dev], [giuseppe@scrivano.org])
 AC_CONFIG_SRCDIR([main.c])
 AC_CONFIG_HEADERS([config.h])
 
