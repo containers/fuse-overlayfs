@@ -227,6 +227,8 @@ static const struct fuse_opt ovl_opts[] = {
    offsetof (struct ovl_data, static_nlink), 1},
   {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
    offsetof (struct ovl_data, fsync), 0},
+  {"noacl",
+   offsetof (struct ovl_data, noacl), 1},
   FUSE_OPT_END
 };
 
@@ -427,7 +429,7 @@ ovl_init (void *userdata, struct fuse_conn_info *conn)
   if ((conn->capable & FUSE_CAP_WRITEBACK_CACHE) == 0)
     lo->writeback = 0;
 
-  if (conn->capable & FUSE_CAP_POSIX_ACL)
+  if ((lo->noacl == 0) && (conn->capable & FUSE_CAP_POSIX_ACL))
     conn->want |= FUSE_CAP_POSIX_ACL;
 
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
@@ -5515,6 +5517,7 @@ main (int argc, char *argv[])
                         .redirect_dir = NULL,
                         .mountpoint = NULL,
                         .fsync = 1,
+                        .noacl = 0,
                         .squash_to_uid = -1,
                         .squash_to_gid = -1,
                         .static_nlink = 0,
