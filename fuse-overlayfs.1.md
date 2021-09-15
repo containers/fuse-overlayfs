@@ -97,6 +97,9 @@ counting the number of hard links for a directory with many files can
 be a slow operation. With this option enabled, the number of hard
 links reported when running stat for any directory is 1.
 
+**-o noacl**
+Disable ACL support in the FUSE file system.
+
 # SEE ALSO
 
 **fuse**(8), **mount**(8), **user_namespaces**(7)

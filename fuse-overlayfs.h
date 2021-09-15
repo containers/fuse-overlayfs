@@ -92,6 +92,7 @@ struct ovl_data
   double timeout;
   int threaded;
   int fsync;
+  int noacl;
   int fast_ino_check;
   int writeback;
   int disable_xattrs;
