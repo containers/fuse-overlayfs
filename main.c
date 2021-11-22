@@ -137,6 +137,8 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
 #define XATTR_CONTAINERS_PREFIX "user.containers."
+#define UNPRIVILEGED_XATTR_PREFIX "user.overlay."
+#define UNPRIVILEGED_OPAQUE_XATTR "user.overlay.opaque"
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
 #define PRIVILEGED_OPAQUE_XATTR "trusted.overlay.opaque"
 #define PRIVILEGED_ORIGIN_XATTR "trusted.overlay.origin"
@@ -495,8 +497,9 @@ has_prefix (const char *str, const char *pref)
 static bool
 can_access_xattr (const char *name)
 {
-  return !has_prefix (name, XATTR_PREFIX)               \
-    && !has_prefix (name, PRIVILEGED_XATTR_PREFIX);
+  return !has_prefix (name, XATTR_PREFIX)
+    && !has_prefix (name, PRIVILEGED_XATTR_PREFIX)
+    && !has_prefix (name, UNPRIVILEGED_XATTR_PREFIX);
 }
 
 static ssize_t
@@ -683,6 +686,8 @@ is_directory_opaque (struct ovl_layer *l, const char *path)
   ssize_t s;
 
   s = l->ds->getxattr (l, path, PRIVILEGED_OPAQUE_XATTR, b, sizeof (b));
+  if (s < 0 && errno == ENODATA)
+    s = l->ds->getxattr (l, path, UNPRIVILEGED_OPAQUE_XATTR, b, sizeof (b));
   if (s < 0 && errno == ENODATA)
     s = l->ds->getxattr (l, path, OPAQUE_XATTR, b, sizeof (b));
 
