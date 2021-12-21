@@ -1,3 +1,10 @@
+* fuse-overlayfs-1.8
+
+- main: honor user.overlay. xattrs.  Native overlay uses user.overlay
+  to store the overlay metadata instead of trusted.overlay, let's
+  honor it as well.
+- main: add a mount flag to disable ACLs.
+
 * fuse-overlayfs-1.7.1
 
 - set FUSE_CAP_POSIX_ACL only when it is supported by FUSE.
