@@ -19,7 +19,7 @@ $ fuse-overlayfs -o uidmapping=0:10:100:100:10000:2000,gidmapping=0:10:100:100:1
 Requirements:
 =======================================================
 
-If your are not using the static build as explained in the next chapter, your system needs `libfuse` > v3.2.1.
+If you are not using the static build as explained in the next chapter, your system needs `libfuse` > v3.2.1.
 
 * On Fedora: `dnf install fuse3-devel`
 * On Ubuntu > v19.04: `apt install libfuse3-dev`
