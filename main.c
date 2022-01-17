@@ -4465,6 +4465,13 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_node key;
   bool destnode_is_whiteout = false;
 
+  pnode = do_lookup_file (lo, parent, NULL);
+  if (pnode == NULL || pnode->whiteout)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
   node = do_lookup_file (lo, parent, name);
   if (node == NULL || node->whiteout)
     {
@@ -4487,7 +4494,6 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
           return;
         }
     }
-  pnode = node->parent;
 
   destpnode = do_lookup_file (lo, newparent, NULL);
   destnode = NULL;
@@ -4527,6 +4533,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
     {
       size_t destnode_whiteouts = 0;
 
+      errno = EINVAL;
       if (!destnode->whiteout && destnode->tmp_ino == node->tmp_ino && destnode->tmp_dev == node->tmp_dev)
         goto error;
 
