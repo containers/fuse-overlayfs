@@ -5131,12 +5131,6 @@ ovl_fsyncdir (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_inf
   return do_fsync (req, ino, datasync, -1);
 }
 
-static int
-direct_ioctl (struct ovl_layer *l, int fd, int cmd, unsigned long *r)
-{
-  return ioctl (fd, cmd, &r);
-}
-
 static void
 ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
            struct fuse_file_info *fi, unsigned int flags,
@@ -5147,7 +5141,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
   cleanup_close int cleaned_fd = -1;
   struct ovl_node *node;
   int fd = -1;
-  unsigned long r;
+  int r = 0;
 
   if (flags & FUSE_IOCTL_COMPAT)
     {
@@ -5203,7 +5197,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
 
   l = release_big_lock ();
 
-  if (direct_ioctl (node->layer, fd, cmd, &r) < 0)
+  if (ioctl (fd, cmd, &r, sizeof (r)) < 0)
     fuse_reply_err (req, errno);
   else
     fuse_reply_ioctl (req, 0, &r, out_bufsz ? sizeof (r) : 0);
