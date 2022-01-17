@@ -1195,7 +1195,7 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
 
       for (it = ino->node; it; it = it->next_link)
         {
-          if (n->parent == it->parent && node_compare (n, it))
+          if (node_dirp (it) || strcmp (n->path, it->path) == 0)
             {
               node_free (n);
               return it;
