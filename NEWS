@@ -1,3 +1,8 @@
+* fuse-overlayfs-1.8.1
+
+- main: fix race when looking up an inode that was renamed.
+- main: fix type used for ioctl.
+
 * fuse-overlayfs-1.8
 
 - main: honor user.overlay. xattrs.  Native overlay uses user.overlay
