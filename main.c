@@ -1077,7 +1077,7 @@ hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 
       // if the parent directory is opaque, there's no need to put a whiteout in it.
       if (node->parent != NULL)
-        needs_whiteout = needs_whiteout && (is_directory_opaque(get_upper_layer(lo), node->parent->path) < 1);
+        needs_whiteout = needs_whiteout && (is_directory_opaque (get_upper_layer(lo), node->parent->path) < 1);
 
       if (needs_whiteout)
         {
@@ -1195,7 +1195,7 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
 
       for (it = ino->node; it; it = it->next_link)
         {
-          if (n->parent == it->parent && node_compare (n, it))
+          if (node_dirp (it) || strcmp (n->path, it->path) == 0)
             {
               node_free (n);
               return it;
@@ -4465,6 +4465,13 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   struct ovl_node key;
   bool destnode_is_whiteout = false;
 
+  pnode = do_lookup_file (lo, parent, NULL);
+  if (pnode == NULL || pnode->whiteout)
+    {
+      fuse_reply_err (req, ENOENT);
+      return;
+    }
+
   node = do_lookup_file (lo, parent, name);
   if (node == NULL || node->whiteout)
     {
@@ -4487,7 +4494,6 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
           return;
         }
     }
-  pnode = node->parent;
 
   destpnode = do_lookup_file (lo, newparent, NULL);
   destnode = NULL;
@@ -4527,6 +4533,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
     {
       size_t destnode_whiteouts = 0;
 
+      errno = EINVAL;
       if (!destnode->whiteout && destnode->tmp_ino == node->tmp_ino && destnode->tmp_dev == node->tmp_dev)
         goto error;
 
@@ -5124,12 +5131,6 @@ ovl_fsyncdir (fuse_req_t req, fuse_ino_t ino, int datasync, struct fuse_file_inf
   return do_fsync (req, ino, datasync, -1);
 }
 
-static int
-direct_ioctl (struct ovl_layer *l, int fd, int cmd, unsigned long *r)
-{
-  return ioctl (fd, cmd, &r);
-}
-
 static void
 ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
            struct fuse_file_info *fi, unsigned int flags,
@@ -5140,7 +5141,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
   cleanup_close int cleaned_fd = -1;
   struct ovl_node *node;
   int fd = -1;
-  unsigned long r;
+  int r = 0;
 
   if (flags & FUSE_IOCTL_COMPAT)
     {
@@ -5196,7 +5197,7 @@ ovl_ioctl (fuse_req_t req, fuse_ino_t ino, int cmd, void *arg,
 
   l = release_big_lock ();
 
-  if (direct_ioctl (node->layer, fd, cmd, &r) < 0)
+  if (ioctl (fd, cmd, &r, sizeof (r)) < 0)
     fuse_reply_err (req, errno);
   else
     fuse_reply_ioctl (req, 0, &r, out_bufsz ? sizeof (r) : 0);
