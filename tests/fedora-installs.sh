@@ -251,5 +251,17 @@ test \! -e upper/a/b
 mknod merged/dev-foo c 10 175
 attr -l merged/dev-foo
 
-umount merged
+# https://github.com/containers/fuse-overlayfs/issues/337
+umount -l merged
 
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+
+mkdir upper/foo
+ln -s not/existing lower/foo
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+stat merged/foo
+
+umount merged
