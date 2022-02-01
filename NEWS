@@ -1,3 +1,8 @@
+* fuse-overlayfs-1.8.2
+
+- main: fix lookup if underlying path is a symlink, but a directory on
+  a upper directory.
+
 * fuse-overlayfs-1.8.1
 
 - main: fix race when looking up an inode that was renamed.

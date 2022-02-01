@@ -1485,6 +1485,9 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
               int r;
 
               r = it->ds->file_exists (it, whiteout_path);
+              if (r < 0 && errno == EACCES)
+                break;
+
               if (r < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
                return NULL;
 
@@ -1659,8 +1662,9 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
 
   for (it = lo->layers; it && !stop_lookup; it = it->next)
     {
-      int ret;
+      struct stat st;
       DIR *dp = NULL;
+      int ret;
 
       if (n->last_layer == it)
         stop_lookup = true;
@@ -1670,6 +1674,17 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
         return NULL;
 
       if (ret == 0)
+        break;
+
+      ret = it->ds->statat (it, path, &st, AT_SYMLINK_NOFOLLOW, STATX_TYPE);
+      if (ret < 0)
+        {
+          if (errno == ENOENT || errno == ENOTDIR || errno == ENAMETOOLONG)
+            continue;
+          return NULL;
+        }
+      /* not a directory, stop lookup in lower layers.  */
+      if ((st.st_mode & S_IFMT) != S_IFDIR)
         break;
 
       dp = it->ds->opendir (it, path);
@@ -1720,6 +1735,8 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           strconcat3 (node_path, PATH_MAX, n->path, "/", dent->d_name);
 
           ret = it->ds->file_exists (it, whiteout_path);
+          if (ret < 0 && errno == EACCES)
+            continue;
           if (ret < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
             {
               it->ds->closedir (dp);
@@ -2020,7 +2037,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
             {
               int saved_errno = errno;
 
-              if (errno == ENOENT || errno == ENOTDIR)
+              if (errno == ENOENT || errno == ENOTDIR || errno == EACCES)
                 {
                   if (node)
                     continue;
