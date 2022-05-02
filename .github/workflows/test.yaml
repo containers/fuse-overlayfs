@@ -61,8 +61,8 @@ jobs:
             sudo apt-get update -q -y
             sudo apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3.8 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel wget libfuse3-dev bats
 
-            sudo mkdir -p /lower /upper /mnt
-            sudo GOPATH=$GOPATH go get -d github.com/containers/storage
+            sudo mkdir -p /lower /upper /mnt $GOPATH/src/github.com/containers
+            sudo sh -c "cd $GOPATH/src/github.com/containers; git clone --depth=1 https://github.com/containers/storage"
             sudo TAGS="$TAGS" GOPATH=$GOPATH sh -c "(cd $GOPATH/src/github.com/containers/storage; sed -i -e 's|^AUTOTAGS.*$|AUTOTAGS := $TAGS|' Makefile; make GO111MODULE=on containers-storage)"
             sudo sh -c "(cd /; git clone https://github.com/amir73il/unionmount-testsuite.git)"
 
