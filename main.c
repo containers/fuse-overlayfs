@@ -3984,10 +3984,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
         case S_IFREG:
           cleaned_up_fd = fd = TEMP_FAILURE_RETRY (safe_openat (dirfd, node->path, O_NOFOLLOW|O_NONBLOCK|(to_set & FUSE_SET_ATTR_SIZE ? O_WRONLY : 0), 0));
           if (fd < 0)
-            {
-              fuse_reply_err (req, errno);
-              return;
-            }
+            strconcat3 (path, PATH_MAX, get_upper_layer (lo)->path, "/", node->path);
           break;
 
         case S_IFDIR:
@@ -3995,10 +3992,7 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
           if (fd < 0)
             {
               if (errno != ELOOP)
-                {
-                  fuse_reply_err (req, errno);
-                  return;
-                }
+                strconcat3 (path, PATH_MAX, get_upper_layer (lo)->path, "/", node->path);
             }
           break;
 
