@@ -2699,7 +2699,11 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
 
           s = safe_read_xattr (&v, sfd, it, 256);
           if (s < 0)
-            return -1;
+           {
+             if (errno == EOVERFLOW)
+               continue;
+             return -1;
+           }
 
           if (fsetxattr (dfd, it, v, s, 0) < 0)
             {
