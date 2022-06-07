@@ -124,9 +124,12 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 }
 #endif
 
+#ifndef RENAME_NOREPLACE
+# define RENAME_NOREPLACE (1 << 0)
+#endif
+
 #ifndef RENAME_EXCHANGE
 # define RENAME_EXCHANGE (1 << 1)
-# define RENAME_NOREPLACE (1 << 2)
 #endif
 
 #ifndef RENAME_WHITEOUT
