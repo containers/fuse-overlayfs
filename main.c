@@ -4631,9 +4631,17 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       ret = direct_renameat2 (srcfd, name, destfd,
                               newname, flags|RENAME_WHITEOUT);
     }
-      /* If the destination is a whiteout, just overwrite it.  */
+  /* If the destination is a whiteout, just overwrite it.  */
   if (ret < 0 && errno == EEXIST)
-    ret = direct_renameat2 (srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
+    {
+      ret = direct_renameat2(srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
+      if (ret >= 0)
+        {
+          ret = create_whiteout(lo, pnode, name, false, false);
+          if (ret < 0)
+            goto error;
+        }
+    }
   if (ret < 0)
     {
       ret = direct_renameat2 (srcfd, name, destfd,
