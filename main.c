@@ -4538,11 +4538,15 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (node == NULL)
     goto error;
 
+  /* If NOREPLACE flag is given, check if we should throw an error now.
+     If not, just remove the flag as it might cause problems with replacing whiteouts later.  */
   if (flags & RENAME_NOREPLACE && destnode && !destnode->whiteout)
     {
       errno = EEXIST;
       goto error;
     }
+  else
+    flags = flags & ~RENAME_NOREPLACE;
 
   if (destnode)
     {
@@ -4597,17 +4601,6 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
         }
     }
 
-  /* If the destnode is a whiteout, first attempt to EXCHANGE the source and the destination,
-   so that with one operation we get both the rename and the whiteout created.  */
-  if (destnode_is_whiteout)
-    {
-      ret = direct_renameat2 (srcfd, name, destfd, newname, flags|RENAME_EXCHANGE);
-      if (ret == 0)
-        goto done;
-
-      /* If it fails for any reason, fallback to the more articulated method.  */
-    }
-
   /* If the node is a directory we must ensure there is no whiteout at the
      destination, otherwise the renameat2 will fail.  Create a .wh.$NAME style
      whiteout file until the renameat2 is completed.  */
@@ -4619,39 +4612,51 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
       unlinkat (destfd, newname, 0);
     }
 
-  /* Try to create the whiteout atomically, if it fails do the
-     rename+mknod separately.  */
-  if (! can_mknod)
+  bool src_needs_whiteout = (node->last_layer != get_upper_layer (lo));
+
+  if (src_needs_whiteout)
     {
-      ret = -1;
-      errno = EPERM;
+      /* Trying to atomically both rename and create the whiteout.
+         If destination is a whiteout, we can EXCHANGE source and destination and reuse the old whiteout.
+         If not, we can try to atomically create one with the WHITEOUT flag.  */
+      if (destnode_is_whiteout)
+        ret = direct_renameat2 (srcfd, name, destfd, newname, flags|RENAME_EXCHANGE);
+      else
+        {
+          if (! can_mknod)
+            {
+              ret = -1;
+              errno = EPERM;
+            }
+          else
+            ret = direct_renameat2 (srcfd, name, destfd, newname, flags|RENAME_WHITEOUT);
+        }
+
+      /* If atomic whiteout creation failed, fall back to separate rename and whiteout creation.  */
+      if (ret < 0)
+        {
+          ret = direct_renameat2 (srcfd, name, destfd, newname, flags);
+          if (ret < 0)
+            goto error;
+
+          ret = create_whiteout (lo, pnode, name, false, true);
+          if (ret < 0)
+            goto error;
+        }
     }
   else
     {
-      ret = direct_renameat2 (srcfd, name, destfd,
-                              newname, flags|RENAME_WHITEOUT);
-    }
-      /* If the destination is a whiteout, just overwrite it.  */
-  if (ret < 0 && errno == EEXIST)
-    ret = direct_renameat2 (srcfd, name, destfd, newname, flags & ~RENAME_NOREPLACE);
-  if (ret < 0)
-    {
-      ret = direct_renameat2 (srcfd, name, destfd,
-                              newname, flags);
+      ret = direct_renameat2 (srcfd, name, destfd, newname, flags);
       if (ret < 0)
         goto error;
-
-      ret = create_whiteout (lo, pnode, name, false, true);
-      if (ret < 0)
-        goto error;
-
-      pnode->loaded = 0;
     }
 
+  pnode->loaded = 0;
+
+  /* If the destination was .wh. style whiteout, it was not replaced automatically, so delete it.  */
   if (delete_whiteout (lo, destfd, NULL, newname) < 0)
     goto error;
 
- done:
   hash_delete (pnode->children, node);
 
   free (node->name);
