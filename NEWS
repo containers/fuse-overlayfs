@@ -1,3 +1,12 @@
+* fuse-overlayfs-1.9
+
+- main: fix setting attributes on file without permissions.
+- main: ignore EOVERFLOW when copying xattrs.
+- main: set the correct value for RENAME_NOREPLACE when it is not already
+  defined in the system headers.
+- main: create source whiteout only when needed
+- main: fix missing source whiteout when destination is whiteout
+
 * fuse-overlayfs-1.8.2
 
 - main: fix lookup if underlying path is a symlink, but a directory on
