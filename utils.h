@@ -23,14 +23,13 @@
 #endif
 
 # include <config.h>
-
-# include <unistd.h>
-# include <stdio.h>
-# include <sys/types.h>
 # include <dirent.h>
+# include <fcntl.h>
+# include <limits.h>
+# include <stdio.h>
 # include <stdlib.h>
 # include <sys/types.h>
-# include <fcntl.h>
+# include <unistd.h>
 # include "fuse-overlayfs.h"
 
 # define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
