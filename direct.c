@@ -44,8 +44,13 @@ static int
 direct_listxattr (struct ovl_layer *l, const char *path, char *buf, size_t size)
 {
   char full_path[PATH_MAX];
-
-  strconcat3 (full_path, PATH_MAX, l->path, "/", path);
+  int ret;
+  ret = snprintf (full_path, sizeof (full_path), "/proc/self/fd/%d/%s", l->fd, path);
+  if (ret >= sizeof (full_path))
+    {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
 
   return llistxattr (full_path, buf, size);
 }
@@ -54,9 +59,13 @@ static int
 direct_getxattr (struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size)
 {
   char full_path[PATH_MAX];
-
-  strconcat3 (full_path, PATH_MAX, l->path, "/", path);
-
+  int ret;
+  ret = snprintf (full_path, sizeof (full_path), "/proc/self/fd/%d/%s", l->fd, path);
+  if (ret >= sizeof (full_path))
+    {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
   return lgetxattr (full_path, name, buf, size);
 }
 
