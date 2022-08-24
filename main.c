@@ -5454,7 +5454,10 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     }
   /* Ignore unknown arguments.  */
   if (key == -1)
-    return 0;
+    {
+      fprintf (stderr, "unknown argument ignored: %s\n", arg);
+      return 0;
+    }
 
   return 1;
 }
