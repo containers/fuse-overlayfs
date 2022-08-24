@@ -5473,7 +5473,7 @@ get_new_args (int *argc, char **argv)
   if (geteuid() == 0)
     newargv[1] = "-odefault_permissions,allow_other,suid,noatime,lazytime";
   else
-    newargv[1] = "-odefault_permissions,noatime=1";
+    newargv[1] = "-odefault_permissions,noatime";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
