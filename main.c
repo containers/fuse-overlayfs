@@ -231,7 +231,7 @@ static const struct fuse_opt ovl_opts[] = {
   {"static_nlink",
    offsetof (struct ovl_data, static_nlink), 1},
   {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
-   offsetof (struct ovl_data, fsync), 0},
+   offsetof (struct ovl_data, volatile_mode), 1},
   {"noacl",
    offsetof (struct ovl_data, noacl), 1},
   FUSE_OPT_END
@@ -5555,6 +5555,7 @@ main (int argc, char *argv[])
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
                         .writeback = 1,
+                        .volatile_mode = 0,
   };
   struct fuse_loop_config fuse_conf = {
                                        .clone_fd = 1,
@@ -5617,6 +5618,9 @@ main (int argc, char *argv[])
 
   set_limits ();
   check_can_mknod (&lo);
+
+  if (lo.volatile_mode)
+    lo.fsync = 0;
 
   if (lo.debug)
     {
