@@ -5394,7 +5394,10 @@ ovl_copy_file_range (fuse_req_t req, fuse_ino_t ino_in, off_t off_in, struct fus
       return;
     }
 
-  fd = node->layer->ds->openat (node->layer, node->path, O_NONBLOCK|O_NOFOLLOW|O_RDONLY, 0755);
+  if (node->hidden)
+    fd = openat (node->hidden_dirfd, node->path, O_NONBLOCK|O_NOFOLLOW|O_RDONLY, 0755);
+  else
+    fd = node->layer->ds->openat (node->layer, node->path, O_NONBLOCK|O_NOFOLLOW|O_RDONLY, 0755);
   if (fd < 0)
     {
       fuse_reply_err (req, errno);
