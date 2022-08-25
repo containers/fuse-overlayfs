@@ -66,6 +66,8 @@
 #include <utils.h>
 #include <plugin.h>
 
+#define ACL_XATTR "system.posix_acl_default"
+
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
   (__extension__                                                              \
@@ -2538,6 +2540,33 @@ ovl_releasedir (fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
   fuse_reply_err (req, 0);
 }
 
+static int
+inherit_acl (struct ovl_data *lo, struct ovl_node *parent, int targetfd, const char *path)
+{
+  cleanup_free char *v = NULL;
+  cleanup_close int dfd = -1;
+  int s;
+
+  if (parent == NULL || lo->noacl)
+    return 0;
+
+  dfd = safe_openat (node_dirfd (parent), parent->path, O_DIRECTORY, 0);
+  if (dfd < 0)
+    return -1;
+
+  s = safe_read_xattr (&v, dfd, ACL_XATTR, 4096);
+  if (s < 0)
+    {
+      if (errno == ENODATA || errno == ENOTSUP)
+        return 0;
+      return -1;
+    }
+  if (targetfd >= 0)
+    return fsetxattr (targetfd, ACL_XATTR, v, s, 0);
+
+  return setxattr (path, ACL_XATTR, v, s, 0);
+}
+
 /* in-place filter xattrs that cannot be accessed.  */
 static ssize_t
 filter_xattrs_list (char *buf, ssize_t len)
@@ -2898,6 +2927,10 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
       if (ret < 0)
         goto out;
     }
+
+  ret = inherit_acl (lo, parent, dfd, NULL);
+  if (ret < 0)
+    goto out;
 
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
   if (ret < 0)
@@ -3670,6 +3703,10 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       fd = direct_create_file (get_upper_layer (lo), get_upper_layer (lo)->fd, path, uid, gid, flags, (mode & ~ctx->umask) | (lo->xattr_permissions ? 0755 : 0));
       if (fd < 0)
         return fd;
+
+      ret = inherit_acl (lo, n, fd, NULL);
+      if (ret < 0)
+        return ret;
 
       if (need_delete_whiteout && delete_whiteout (lo, -1, p, name) < 0)
         return -1;
@@ -4918,6 +4955,14 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     }
 
   ret = asprintf (&path, "%s/%s", pnode->path, name);
+  if (ret < 0)
+    {
+      fuse_reply_err (req, errno);
+      unlinkat (lo->workdir_fd, wd_tmp_file_name, 0);
+      return;
+    }
+
+  ret = inherit_acl (lo, pnode, -1, path);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
