@@ -233,7 +233,7 @@ static const struct fuse_opt ovl_opts[] = {
   {"static_nlink",
    offsetof (struct ovl_data, static_nlink), 1},
   {"volatile",  /* native overlay supports "volatile" to mean fsync=0.  */
-   offsetof (struct ovl_data, fsync), 0},
+   offsetof (struct ovl_data, volatile_mode), 1},
   {"noacl",
    offsetof (struct ovl_data, noacl), 1},
   FUSE_OPT_END
@@ -5484,7 +5484,10 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
     }
   /* Ignore unknown arguments.  */
   if (key == -1)
-    return 0;
+    {
+      fprintf (stderr, "unknown argument ignored: %s\n", arg);
+      return 0;
+    }
 
   return 1;
 }
@@ -5503,7 +5506,7 @@ get_new_args (int *argc, char **argv)
   if (geteuid() == 0)
     newargv[1] = "-odefault_permissions,allow_other,suid,noatime,lazytime";
   else
-    newargv[1] = "-odefault_permissions,noatime=1";
+    newargv[1] = "-odefault_permissions,noatime";
   for (i = 1; i < *argc; i++)
     newargv[i + 1] = argv[i];
   (*argc)++;
@@ -5585,6 +5588,7 @@ main (int argc, char *argv[])
                         .timeout = 1000000000.0,
                         .timeout_str = NULL,
                         .writeback = 1,
+                        .volatile_mode = 0,
   };
   struct fuse_loop_config fuse_conf = {
                                        .clone_fd = 1,
@@ -5648,6 +5652,9 @@ main (int argc, char *argv[])
   set_limits ();
   check_can_mknod (&lo);
   check_writeable_proc ();
+
+  if (lo.volatile_mode)
+    lo.fsync = 0;
 
   if (lo.debug)
     {

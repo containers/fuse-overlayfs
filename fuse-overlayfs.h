@@ -102,6 +102,8 @@ struct ovl_data
   int squash_to_gid;
   int static_nlink;
 
+  int volatile_mode;
+
   /* current uid/gid*/
   uid_t uid;
   uid_t gid;
