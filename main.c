@@ -37,7 +37,9 @@
 #include <dirent.h>
 #include <assert.h>
 #include <errno.h>
+#include <linux/magic.h>
 #include <err.h>
+#include <sys/vfs.h>
 #include <sys/ioctl.h>
 #ifdef HAVE_SYS_SENDFILE_H
 # include <sys/sendfile.h>
@@ -289,6 +291,34 @@ static struct ovl_node *
 inode_to_node (struct ovl_data *lo, ino_t n)
 {
   return lookup_inode (lo, n)->node;
+}
+
+static void
+check_writeable_proc ()
+{
+  struct statvfs svfs;
+  struct statfs sfs;
+
+  int ret;
+
+  ret = statfs ("/proc", &sfs);
+  if (ret < 0)
+    {
+      fprintf (stderr, "error stating /proc: %m\n");
+      return;
+    }
+
+  if (sfs.f_type != PROC_SUPER_MAGIC)
+    {
+      fprintf (stderr, "invalid file system type found on /proc: %m\n");
+      return;
+    }
+
+  if (svfs.f_flag & ST_RDONLY)
+    {
+      fprintf (stderr, "/proc seems to be mounted as readonly, it can lead to unexpected failures");
+      return;
+    }
 }
 
 static void
@@ -5617,6 +5647,7 @@ main (int argc, char *argv[])
 
   set_limits ();
   check_can_mknod (&lo);
+  check_writeable_proc ();
 
   if (lo.debug)
     {
