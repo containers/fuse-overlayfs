@@ -38,8 +38,15 @@ jobs:
 
           run: |
             ./autogen.sh
-            ./configure
+            LIBS="-ldl" LDFLAGS="-static" ./configure
             make -j $(nproc)
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: fuse-overlayfs-${{ matrix.arch }}-${{ matrix.distro }}
+          path: |
+            fuse-overlayfs
 
   Test:
     runs-on: ubuntu-20.04
@@ -72,13 +79,21 @@ jobs:
 
     - name: run configure
       run: |
-        ./configure
+        LIBS="-ldl" LDFLAGS="-static" ./configure
 
     - name: build and install
       run: |
         make -j $(nproc)
         sudo make -j install
         sudo cp fuse-overlayfs /sbin
+
+    - name: Archive build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: fuse-overlayfs-x86_64-ubuntu20.04
+        path: |
+          fuse-overlayfs
+      if: ${{ matrix.test == 'ovl-whiteouts' }}
 
     - name: run test
       run: |
