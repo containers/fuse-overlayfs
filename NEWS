@@ -1,3 +1,12 @@
+* fuse-overlayfs-1.10
+
+- main: use /proc/self/fd to read xattrs.
+- main: inherit ACLs for new files/dirs.
+- main: fix passing noatime.
+- main: add checks for valid /proc mount.
+- main: fix copy_file_range for deleted files.
+- main: fix creating links of just deleted files.
+
 * fuse-overlayfs-1.9
 
 - main: fix setting attributes on file without permissions.
