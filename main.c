@@ -3406,6 +3406,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   node_set_name (&key, (char *) name);
 
   rm = hash_delete (pnode->children, &key);
+  fuse_lowlevel_notify_inval_inode (lo->se, node_to_inode (node), -1, 0);
   if (rm)
     {
       ret = hide_node (lo, rm, true);
