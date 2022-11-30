@@ -944,7 +944,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
-  if (ret == 0 && node_dirp (node))
+
+  if (node_dirp (node))
     {
       if (!data->static_nlink)
         {
@@ -960,6 +961,14 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
         }
       else
         st->st_nlink = 1;
+    }
+  else
+    {
+      struct ovl_node *n;
+
+      st->st_nlink = 0;
+      for (n = node->ino->node; n; n = n->next_link)
+        st->st_nlink++;
     }
 
   return ret;
