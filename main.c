@@ -944,7 +944,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
-  if (ret == 0 && node_dirp (node))
+
+  if (node_dirp (node))
     {
       if (!data->static_nlink)
         {
@@ -960,6 +961,14 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
         }
       else
         st->st_nlink = 1;
+    }
+  else
+    {
+      struct ovl_node *n;
+
+      st->st_nlink = 0;
+      for (n = node->ino->node; n; n = n->next_link)
+        st->st_nlink++;
     }
 
   return ret;
@@ -2039,7 +2048,13 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     pnode = inode_to_node (lo, parent);
 
   if (name == NULL)
-    return pnode;
+    {
+      /* Prefer a version that is loaded.  */
+      for (node = pnode; node; node = node->next_link)
+        if (node->parent)
+          return node;
+      return pnode;
+    }
 
   if (has_prefix (name, ".wh."))
     {
@@ -3397,6 +3412,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
   node_set_name (&key, (char *) name);
 
   rm = hash_delete (pnode->children, &key);
+  fuse_lowlevel_notify_inval_inode (lo->se, node_to_inode (node), -1, 0);
   if (rm)
     {
       ret = hide_node (lo, rm, true);
