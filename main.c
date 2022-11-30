@@ -2048,7 +2048,13 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     pnode = inode_to_node (lo, parent);
 
   if (name == NULL)
-    return pnode;
+    {
+      /* Prefer a version that is loaded.  */
+      for (node = pnode; node; node = node->next_link)
+        if (node->parent)
+          return node;
+      return pnode;
+    }
 
   if (has_prefix (name, ".wh."))
     {
