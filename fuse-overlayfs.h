@@ -24,6 +24,8 @@
 # include <stdbool.h>
 # include <sys/types.h>
 
+# define ACL_XATTR "system.posix_acl_default"
+
 typedef struct hash_table Hash_table;
 
 struct ovl_ino
@@ -151,6 +153,7 @@ struct data_source
   int (*listxattr)(struct ovl_layer *l, const char *path, char *buf, size_t size);
   int (*getxattr)(struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size);
   ssize_t (*readlinkat)(struct ovl_layer *l, const char *path, char *buf, size_t bufsiz);
+  bool (*support_acls)(struct ovl_layer *l);
 };
 
 /* passthrough to the file system.  */

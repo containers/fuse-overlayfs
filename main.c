@@ -66,8 +66,6 @@
 #include <utils.h>
 #include <plugin.h>
 
-#define ACL_XATTR "system.posix_acl_default"
-
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
   (__extension__                                                              \
@@ -5763,6 +5761,12 @@ main (int argc, char *argv[])
     }
 
   lo.layers = layers;
+
+  for (tmp_layer = layers; !lo.noacl && tmp_layer; tmp_layer = tmp_layer->next)
+    {
+      if (! tmp_layer->ds->support_acls (tmp_layer))
+	lo.noacl = 1;
+    }
 
   if (lo.upperdir)
     {

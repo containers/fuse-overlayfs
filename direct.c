@@ -206,6 +206,16 @@ direct_num_of_layers (const char *opaque, const char *path)
   return 1;
 }
 
+static bool
+direct_support_acls (struct ovl_layer *l)
+{
+  char value[32];
+
+  return fgetxattr (l->fd, ACL_XATTR, value, sizeof (value)) >= 0
+    || errno != ENOTSUP;
+}
+
+
 struct data_source direct_access_ds =
   {
    .num_of_layers = direct_num_of_layers,
@@ -221,4 +231,5 @@ struct data_source direct_access_ds =
    .getxattr = direct_getxattr,
    .listxattr = direct_listxattr,
    .readlinkat = direct_readlinkat,
+   .support_acls = direct_support_acls,
   };
