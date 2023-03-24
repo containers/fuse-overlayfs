@@ -12,18 +12,18 @@ jobs:
     - uses: actions/checkout@v2
     - uses: docker/setup-buildx-action@v1
     - name: "Build binaries from Containerfile.cross"
-      run: docker buildx build -o /tmp --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 -f Containerfile.cross .
-    - name: "Create /tmp/artifact"
+      run: docker buildx build -o out --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 -f Containerfile.cross .
+    - name: "Create out/artifact"
       run: |
-        mkdir -p /tmp/artifact
-        mv /tmp/linux_amd64/fuse-overlayfs /tmp/artifact/fuse-overlayfs-x86_64
-        mv /tmp/linux_arm64/fuse-overlayfs /tmp/artifact/fuse-overlayfs-aarch64
-        mv /tmp/linux_arm_v7/fuse-overlayfs /tmp/artifact/fuse-overlayfs-armv7l
-        mv /tmp/linux_s390x/fuse-overlayfs /tmp/artifact/fuse-overlayfs-s390x
-        mv /tmp/linux_ppc64le/fuse-overlayfs /tmp/artifact/fuse-overlayfs-ppc64le
-        mv /tmp/linux_riscv64/fuse-overlayfs /tmp/artifact/fuse-overlayfs-riscv64
+        mkdir -p out/artifact
+        mv out/linux_amd64/fuse-overlayfs out/artifact/fuse-overlayfs-x86_64
+        mv out/linux_arm64/fuse-overlayfs out/artifact/fuse-overlayfs-aarch64
+        mv out/linux_arm_v7/fuse-overlayfs out/artifact/fuse-overlayfs-armv7l
+        mv out/linux_s390x/fuse-overlayfs out/artifact/fuse-overlayfs-s390x
+        mv out/linux_ppc64le/fuse-overlayfs out/artifact/fuse-overlayfs-ppc64le
+        mv out/linux_riscv64/fuse-overlayfs out/artifact/fuse-overlayfs-riscv64
     - name: "SHA256SUMS"
-      run: (cd /tmp/artifact; sha256sum *) | tee /tmp/SHA256SUMS
+      run: (cd out/artifact; sha256sum *) | tee out/SHA256SUMS
     - name: "Create release"
       uses: actions/create-release@v1
       id: create_release
@@ -39,7 +39,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-x86_64
+        asset_path: out/artifact/fuse-overlayfs-x86_64
         asset_name: fuse-overlayfs-x86_64
         asset_content_type: application/octet-stream
     - name: "Upload fuse-overlayfs-aarch64"
@@ -48,7 +48,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-aarch64
+        asset_path: out/artifact/fuse-overlayfs-aarch64
         asset_name: fuse-overlayfs-aarch64
         asset_content_type: application/octet-stream
     - name: "Upload fuse-overlayfs-armv7l"
@@ -57,7 +57,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-armv7l
+        asset_path: out/artifact/fuse-overlayfs-armv7l
         asset_name: fuse-overlayfs-armv7l
         asset_content_type: application/octet-stream
     - name: "Upload fuse-overlayfs-s390x"
@@ -66,7 +66,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-s390x
+        asset_path: out/artifact/fuse-overlayfs-s390x
         asset_name: fuse-overlayfs-s390x
         asset_content_type: application/octet-stream
     - name: "Upload fuse-overlayfs-ppc64le"
@@ -75,7 +75,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-ppc64le
+        asset_path: out/artifact/fuse-overlayfs-ppc64le
         asset_name: fuse-overlayfs-ppc64le
         asset_content_type: application/octet-stream
     - name: "Upload fuse-overlayfs-riscv64"
@@ -84,7 +84,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/artifact/fuse-overlayfs-riscv64
+        asset_path: out/artifact/fuse-overlayfs-riscv64
         asset_name: fuse-overlayfs-riscv64
         asset_content_type: application/octet-stream
     - name: "Upload SHA256SUMS"
@@ -93,6 +93,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: /tmp/SHA256SUMS
+        asset_path: out/SHA256SUMS
         asset_name: SHA256SUMS
         asset_content_type: text/plain
