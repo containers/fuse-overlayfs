@@ -3,7 +3,7 @@ Name: fuse-overlayfs
 Version: #VERSION#
 Release: 1%{?dist}
 Source0: %{url}/archive/%{name}-%{version}.tar.gz
-License: GPLv3+
+License: GPLv2+
 URL: https://github.com/giuseppe/fuse-overlayfs
 
 # We always run autogen.sh
