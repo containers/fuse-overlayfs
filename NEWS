@@ -1,3 +1,9 @@
+* fuse-overlayfs-1.12
+
+- change license to GPL-2.0-or-later.
+
+- main: if a lower layer doesn't support ACLs do not enable them.
+
 * fuse-overlayfs-1.11
 
 - main: if a lower layer doesn't support ACLs do not enable them.
