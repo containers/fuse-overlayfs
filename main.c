@@ -296,25 +296,23 @@ inode_to_node (struct ovl_data *lo, ino_t n)
 static void
 check_writeable_proc ()
 {
-  struct statvfs svfs;
-  struct statfs sfs;
-
+  struct statfs svfs;
   int ret;
 
-  ret = statfs ("/proc", &sfs);
+  ret = statfs ("/proc", &svfs);
   if (ret < 0)
     {
       fprintf (stderr, "error stating /proc: %m\n");
       return;
     }
 
-  if (sfs.f_type != PROC_SUPER_MAGIC)
+  if (svfs.f_type != PROC_SUPER_MAGIC)
     {
-      fprintf (stderr, "invalid file system type found on /proc: %m\n");
+      fprintf (stderr, "invalid file system type found on /proc: %d, expected %d\n", svfs.f_fsid, PROC_SUPER_MAGIC);
       return;
     }
 
-  if (svfs.f_flag & ST_RDONLY)
+  if (svfs.f_flags & ST_RDONLY)
     {
       fprintf (stderr, "/proc seems to be mounted as readonly, it can lead to unexpected failures");
       return;
