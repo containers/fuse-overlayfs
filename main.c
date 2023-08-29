@@ -941,9 +941,13 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
   st->st_ino = node->tmp_ino;
   st->st_dev = node->tmp_dev;
 
-  if (node_dirp (node))
+  if (node->loaded && node->n_links > 0)
+    st->st_nlink = node->n_links;
+  else if (node_dirp (node))
     {
-      if (!data->static_nlink)
+      if (data->static_nlink)
+        st->st_nlink = 1;
+      else
         {
           struct ovl_node *it;
 
@@ -955,8 +959,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
                 st->st_nlink++;
             }
         }
-      else
-        st->st_nlink = 1;
+
+      node->n_links = st->st_nlink;
     }
   else
     {
@@ -5157,6 +5161,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
   e.attr_timeout = get_timeout (lo);
   e.entry_timeout = get_timeout (lo);
   node->ino->lookups++;
+  pnode->n_links++;
   fuse_reply_entry (req, &e);
 }
 

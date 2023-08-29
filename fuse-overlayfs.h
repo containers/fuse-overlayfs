@@ -54,6 +54,8 @@ struct ovl_node
   struct ovl_node *next_link;
   unsigned int in_readdir;
 
+  size_t n_links;
+
   unsigned int do_unlink : 1;
   unsigned int do_rmdir : 1;
   unsigned int hidden : 1;
