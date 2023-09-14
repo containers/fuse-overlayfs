@@ -1,14 +1,38 @@
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.1.0 AS xx
-FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS fuse-overlayfs
-RUN apt-get update && \
+# Usage:
+# docker buildx build \
+#   -o /tmp/fuse-overlayfs-builds \
+#   --build-arg SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) \
+#   --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 \
+#   -f Containerfile.cross .
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.2.1 AS xx
+FROM --platform=$BUILDPLATFORM ubuntu:jammy-20230804 AS fuse-overlayfs
+ADD --chmod=0755 \
+  https://raw.githubusercontent.com/reproducible-containers/repro-sources-list.sh/v0.1.0/repro-sources-list.sh \
+  /usr/local/bin/repro-sources-list.sh
+RUN \
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  repro-sources-list.sh && \
+  apt-get update && \
   apt-get install --no-install-recommends -y \
   git make automake autoconf pkgconf file go-md2man
+# Set SOURCE_DATE_EPOCH after running repro-sources-list.sh, for cache efficiency
+ARG SOURCE_DATE_EPOCH
 COPY . /fuse-overlayfs
 WORKDIR /fuse-overlayfs
 COPY --from=xx / /
 ARG TARGETPLATFORM
 ENV DEBIAN_FRONTEND=noninteractive
-RUN xx-apt-get install -y gcc libfuse3-dev
+# xx-apt-get cannot be used, as it clobbers /etc/apt/sources.list created by repro-sources-list.sh
+RUN \
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  darch="$(xx-info debian-arch)" && \
+  dpkg --add-architecture ${darch} && \
+  apt-get update && \
+  gcc="gcc" && \
+  if xx-info is-cross; then gcc="gcc-$(xx-info triple)"; fi; \
+  apt-get install -y "${gcc}" "libfuse3-dev:${darch}"
 RUN ./autogen.sh && \
   LIBS="-ldl" LDFLAGS="-static" ./configure --host=$(xx-info) && \
   make && mkdir /out && cp fuse-overlayfs /out && \

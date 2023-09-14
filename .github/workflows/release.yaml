@@ -1,98 +1,82 @@
 name: Release
 on:
   push:
-    tags:
-    - 'test-cross-*'
-    - 'v*'
+  pull_request:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v2
-    - uses: docker/setup-buildx-action@v1
+    - uses: actions/checkout@v4
+      with:
+        # Reproduce the exact commit hash value
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.sha }}
+    - run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+    - uses: docker/setup-buildx-action@v2
+    - name: Cache var-cache-apt
+      uses: actions/cache@v3
+      with:
+        path: var-cache-apt
+        key: var-cache-apt-${{ hashFiles('Containerfile.cross') }}
+    - name: Cache var-lib-apt
+      uses: actions/cache@v3
+      with:
+        path: var-lib-apt
+        key: var-lib-apt-${{ hashFiles('Containerfile.cross') }}
+    - name: inject var-cache-apt into docker
+      uses: reproducible-containers/buildkit-cache-dance@v2.1.2
+      with:
+        cache-source: var-cache-apt
+        cache-target: /var/cache/apt
+    - name: inject var-lib-apt into docker
+      uses: reproducible-containers/buildkit-cache-dance@v2.1.2
+      with:
+        cache-source: var-lib-apt
+        cache-target: /var/lib/apt
     - name: "Build binaries from Containerfile.cross"
-      run: docker buildx build -o out --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 -f Containerfile.cross .
-    - name: "Create out/artifact"
+      run: docker buildx build -o /tmp/fuse-overlayfs-builds --build-arg SOURCE_DATE_EPOCH --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 -f Containerfile.cross .
+    - name: "Create /tmp/artifact"
       run: |
-        mkdir -p out/artifact
-        mv out/linux_amd64/fuse-overlayfs out/artifact/fuse-overlayfs-x86_64
-        mv out/linux_arm64/fuse-overlayfs out/artifact/fuse-overlayfs-aarch64
-        mv out/linux_arm_v7/fuse-overlayfs out/artifact/fuse-overlayfs-armv7l
-        mv out/linux_s390x/fuse-overlayfs out/artifact/fuse-overlayfs-s390x
-        mv out/linux_ppc64le/fuse-overlayfs out/artifact/fuse-overlayfs-ppc64le
-        mv out/linux_riscv64/fuse-overlayfs out/artifact/fuse-overlayfs-riscv64
+        mkdir -p /tmp/artifact
+        mv /tmp/fuse-overlayfs-builds/linux_amd64/fuse-overlayfs   /tmp/artifact/fuse-overlayfs-x86_64
+        mv /tmp/fuse-overlayfs-builds/linux_arm64/fuse-overlayfs   /tmp/artifact/fuse-overlayfs-aarch64
+        mv /tmp/fuse-overlayfs-builds/linux_arm_v7/fuse-overlayfs  /tmp/artifact/fuse-overlayfs-armv7l
+        mv /tmp/fuse-overlayfs-builds/linux_s390x/fuse-overlayfs   /tmp/artifact/fuse-overlayfs-s390x
+        mv /tmp/fuse-overlayfs-builds/linux_ppc64le/fuse-overlayfs /tmp/artifact/fuse-overlayfs-ppc64le
+        mv /tmp/fuse-overlayfs-builds/linux_riscv64/fuse-overlayfs /tmp/artifact/fuse-overlayfs-riscv64
+        echo "${SOURCE_DATE_EPOCH}" >/tmp/artifact/SOURCE_DATE_EPOCH
     - name: "SHA256SUMS"
-      run: (cd out/artifact; sha256sum *) | tee out/SHA256SUMS
+      run: (cd /tmp/artifact; sha256sum *) | tee /tmp/SHA256SUMS
+    - name: "The sha256sum of the SHA256SUMS file"
+      run: sha256sum /tmp/SHA256SUMS
+    - name: "Prepare the release note"
+      run: |
+        tag="${GITHUB_REF##*/}"
+        cat << EOF | tee /tmp/release-note.txt
+        ${tag}
+
+        #### About the binaries
+        The binaries were built automatically on GitHub Actions.
+        The build log is available for 90 days: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+        The binaries should be reproducible with the following command:
+        \`\`\`
+        docker buildx build \
+          -o /tmp/fuse-overlayfs-builds \
+          --build-arg SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} \
+          --build-arg BUILDKIT_CONTEXT_KEEP_GIT_DIR=1 \
+          --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 \
+          -f Containerfile.cross \
+          "https://github.com/${{ github.repository }}.git#${tag}"
+        \`\`\`
+        EOF
     - name: "Create release"
-      uses: actions/create-release@v1
-      id: create_release
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: ${{ github.ref }}
-        draft: true
-    - name: "Upload fuse-overlayfs-x86_64"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-x86_64
-        asset_name: fuse-overlayfs-x86_64
-        asset_content_type: application/octet-stream
-    - name: "Upload fuse-overlayfs-aarch64"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-aarch64
-        asset_name: fuse-overlayfs-aarch64
-        asset_content_type: application/octet-stream
-    - name: "Upload fuse-overlayfs-armv7l"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-armv7l
-        asset_name: fuse-overlayfs-armv7l
-        asset_content_type: application/octet-stream
-    - name: "Upload fuse-overlayfs-s390x"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-s390x
-        asset_name: fuse-overlayfs-s390x
-        asset_content_type: application/octet-stream
-    - name: "Upload fuse-overlayfs-ppc64le"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-ppc64le
-        asset_name: fuse-overlayfs-ppc64le
-        asset_content_type: application/octet-stream
-    - name: "Upload fuse-overlayfs-riscv64"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/artifact/fuse-overlayfs-riscv64
-        asset_name: fuse-overlayfs-riscv64
-        asset_content_type: application/octet-stream
-    - name: "Upload SHA256SUMS"
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: out/SHA256SUMS
-        asset_name: SHA256SUMS
-        asset_content_type: text/plain
+      run: |
+        tag="${GITHUB_REF##*/}"
+        asset_flags=()
+        for f in /tmp/artifact/* /tmp/SHA256SUMS; do asset_flags+=("-a" "$f"); done
+        hub release create "${asset_flags[@]}" -F /tmp/release-note.txt --draft "${tag}"
