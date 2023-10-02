@@ -32,48 +32,42 @@
 #include <sys/xattr.h>
 
 #ifndef TEMP_FAILURE_RETRY
-#define TEMP_FAILURE_RETRY(expression) \
-  (__extension__                                                              \
-    ({ long int __result;                                                     \
+#  define TEMP_FAILURE_RETRY(expression) \
+    (__extension__ ({ long int __result;                                                     \
        do __result = (long int) (expression);                                 \
        while (__result == -1L && errno == EINTR);                             \
        __result; }))
 #endif
 
 #ifndef RESOLVE_IN_ROOT
-# define RESOLVE_IN_ROOT		0x10
+#  define RESOLVE_IN_ROOT 0x10
 #endif
 #ifndef __NR_openat2
-# define __NR_openat2 437
+#  define __NR_openat2 437
 #endif
 
 /* uClibc and uClibc-ng don't provide O_TMPFILE */
 #ifndef O_TMPFILE
-# define O_TMPFILE (020000000 | O_DIRECTORY)
+#  define O_TMPFILE (020000000 | O_DIRECTORY)
 #endif
 
 /* List of all valid flags for the open/openat flags argument: */
 #define VALID_OPEN_FLAGS \
-  (O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | \
-   O_APPEND | O_NDELAY | O_NONBLOCK | O_NDELAY | O_SYNC | O_DSYNC |     \
-   FASYNC | O_DIRECT | O_LARGEFILE | O_DIRECTORY | O_NOFOLLOW |         \
-   O_NOATIME | O_CLOEXEC | O_PATH | O_TMPFILE)
+  (O_RDONLY | O_WRONLY | O_RDWR | O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | O_APPEND | O_NDELAY | O_NONBLOCK | O_NDELAY | O_SYNC | O_DSYNC | FASYNC | O_DIRECT | O_LARGEFILE | O_DIRECTORY | O_NOFOLLOW | O_NOATIME | O_CLOEXEC | O_PATH | O_TMPFILE)
 
 static int
 syscall_openat2 (int dirfd, const char *path, uint64_t flags, uint64_t mode, uint64_t resolve)
 {
   struct openat2_open_how
-    {
-      uint64_t flags;
-      uint64_t mode;
-      uint64_t resolve;
-    }
-  how =
-    {
-     .flags = flags & VALID_OPEN_FLAGS,
-     .mode = (flags & O_CREAT) ? (mode & 07777) : 0,
-     .resolve = resolve,
-    };
+  {
+    uint64_t flags;
+    uint64_t mode;
+    uint64_t resolve;
+  } how = {
+    .flags = flags & VALID_OPEN_FLAGS,
+    .mode = (flags & O_CREAT) ? (mode & 07777) : 0,
+    .resolve = resolve,
+  };
 
   return (int) syscall (__NR_openat2, dirfd, path, &how, sizeof (how), 0);
 }
@@ -97,18 +91,19 @@ safe_openat (int dirfd, const char *pathname, int flags, mode_t mode)
         }
       return ret;
     }
- fallback:
+fallback:
   return openat (dirfd, pathname, flags, mode);
 }
 
 int
 file_exists_at (int dirfd, const char *pathname)
 {
-  int ret = faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW|AT_EACCESS);
-  if (ret < 0 && errno == EINVAL) {
-    struct stat buf;
-    return fstatat (dirfd, pathname, &buf, AT_SYMLINK_NOFOLLOW);
-  }
+  int ret = faccessat (dirfd, pathname, F_OK, AT_SYMLINK_NOFOLLOW | AT_EACCESS);
+  if (ret < 0 && errno == EINVAL)
+    {
+      struct stat buf;
+      return fstatat (dirfd, pathname, &buf, AT_SYMLINK_NOFOLLOW);
+    }
   return ret;
 }
 
@@ -219,7 +214,7 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
 {
   out[0] = '\0';
 
-  *fd = l->ds->openat (l, path, O_NONBLOCK|O_NOFOLLOW|flags, 0);
+  *fd = l->ds->openat (l, path, O_NONBLOCK | O_NOFOLLOW | flags, 0);
   if (*fd < 0 && (errno == ELOOP || errno == EISDIR || errno == ENXIO))
     {
       strconcat3 (out, PATH_MAX, l->path, "/", path);

@@ -16,15 +16,15 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #ifndef FUSE_OVERLAYFS_H
-# define FUSE_OVERLAYFS_H
-# define _GNU_SOURCE
+#define FUSE_OVERLAYFS_H
+#define _GNU_SOURCE
 
-# include <sys/stat.h>
-# include <plugin-manager.h>
-# include <stdbool.h>
-# include <sys/types.h>
+#include <sys/stat.h>
+#include <plugin-manager.h>
+#include <stdbool.h>
+#include <sys/types.h>
 
-# define ACL_XATTR "system.posix_acl_default"
+#define ACL_XATTR "system.posix_acl_default"
 
 typedef struct hash_table Hash_table;
 
@@ -143,39 +143,39 @@ struct ovl_layer
 struct data_source
 {
   int (*num_of_layers) (const char *opaque, const char *path);
-  int (*load_data_source)(struct ovl_layer *l, const char *opaque, const char *path, int n_layer);
-  int (*cleanup)(struct ovl_layer *l);
-  int (*file_exists)(struct ovl_layer *l, const char *pathname);
-  int (*statat)(struct ovl_layer *l, const char *path, struct stat *st, int flags, unsigned int mask);
-  int (*fstat)(struct ovl_layer *l, int fd, const char *path, unsigned int mask, struct stat *st);
-  void *(*opendir)(struct ovl_layer *l, const char *path);
-  struct dirent *(*readdir)(void *dirp);
-  int (*closedir)(void *dirp);
-  int (*openat)(struct ovl_layer *l, const char *path, int flags, mode_t mode);
-  int (*listxattr)(struct ovl_layer *l, const char *path, char *buf, size_t size);
-  int (*getxattr)(struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size);
-  ssize_t (*readlinkat)(struct ovl_layer *l, const char *path, char *buf, size_t bufsiz);
-  bool (*support_acls)(struct ovl_layer *l);
+  int (*load_data_source) (struct ovl_layer *l, const char *opaque, const char *path, int n_layer);
+  int (*cleanup) (struct ovl_layer *l);
+  int (*file_exists) (struct ovl_layer *l, const char *pathname);
+  int (*statat) (struct ovl_layer *l, const char *path, struct stat *st, int flags, unsigned int mask);
+  int (*fstat) (struct ovl_layer *l, int fd, const char *path, unsigned int mask, struct stat *st);
+  void *(*opendir) (struct ovl_layer *l, const char *path);
+  struct dirent *(*readdir) (void *dirp);
+  int (*closedir) (void *dirp);
+  int (*openat) (struct ovl_layer *l, const char *path, int flags, mode_t mode);
+  int (*listxattr) (struct ovl_layer *l, const char *path, char *buf, size_t size);
+  int (*getxattr) (struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size);
+  ssize_t (*readlinkat) (struct ovl_layer *l, const char *path, char *buf, size_t bufsiz);
+  bool (*support_acls) (struct ovl_layer *l);
 };
 
 /* passthrough to the file system.  */
 extern struct data_source direct_access_ds;
 
-# ifndef HAVE_STATX
-#  define STATX_TYPE		0x00000001U	/* Want/got stx_mode & S_IFMT */
-#  define STATX_MODE		0x00000002U	/* Want/got stx_mode & ~S_IFMT */
-#  define STATX_NLINK		0x00000004U	/* Want/got stx_nlink */
-#  define STATX_UID		0x00000008U	/* Want/got stx_uid */
-#  define STATX_GID		0x00000010U	/* Want/got stx_gid */
-#  define STATX_ATIME		0x00000020U	/* Want/got stx_atime */
-#  define STATX_MTIME		0x00000040U	/* Want/got stx_mtime */
-#  define STATX_CTIME		0x00000080U	/* Want/got stx_ctime */
-#  define STATX_INO		0x00000100U	/* Want/got stx_ino */
-#  define STATX_SIZE		0x00000200U	/* Want/got stx_size */
-#  define STATX_BLOCKS		0x00000400U	/* Want/got stx_blocks */
-#  define STATX_BASIC_STATS	0x000007ffU	/* The stuff in the normal stat struct */
-#  define STATX_BTIME		0x00000800U	/* Want/got stx_btime */
-#  define STATX_ALL		0x00000fffU	/* All currently supported flags */
-# endif
+#ifndef HAVE_STATX
+#  define STATX_TYPE 0x00000001U        /* Want/got stx_mode & S_IFMT */
+#  define STATX_MODE 0x00000002U        /* Want/got stx_mode & ~S_IFMT */
+#  define STATX_NLINK 0x00000004U       /* Want/got stx_nlink */
+#  define STATX_UID 0x00000008U         /* Want/got stx_uid */
+#  define STATX_GID 0x00000010U         /* Want/got stx_gid */
+#  define STATX_ATIME 0x00000020U       /* Want/got stx_atime */
+#  define STATX_MTIME 0x00000040U       /* Want/got stx_mtime */
+#  define STATX_CTIME 0x00000080U       /* Want/got stx_ctime */
+#  define STATX_INO 0x00000100U         /* Want/got stx_ino */
+#  define STATX_SIZE 0x00000200U        /* Want/got stx_size */
+#  define STATX_BLOCKS 0x00000400U      /* Want/got stx_blocks */
+#  define STATX_BASIC_STATS 0x000007ffU /* The stuff in the normal stat struct */
+#  define STATX_BTIME 0x00000800U       /* Want/got stx_btime */
+#  define STATX_ALL 0x00000fffU         /* All currently supported flags */
+#endif
 
 #endif

@@ -17,10 +17,10 @@
 */
 
 #ifndef PLUGIN_MANAGER_H
-# define PLUGIN_MANAGER_H
-# include <config.h>
+#define PLUGIN_MANAGER_H
+#include <config.h>
 
-# include <dlfcn.h>
+#include <dlfcn.h>
 
 struct ovl_plugin_context
 {
@@ -37,8 +37,7 @@ struct ovl_plugin_context *load_plugins (const char *plugins);
 /* taken from glibc unistd.h and fixes musl */
 #ifndef TEMP_FAILURE_RETRY
 #define TEMP_FAILURE_RETRY(expression) \
-  (__extension__                                                              \
-    ({ long int __result;                                                     \
+  (__extension__ ({ long int __result;                                                     \
        do __result = (long int) (expression);                                 \
        while (__result == -1L && errno == EINTR);                             \
        __result; }))

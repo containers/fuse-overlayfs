@@ -17,24 +17,26 @@
 */
 
 #ifndef FUSE_OVERLAYFS_ERROR_H
-# define FUSE_OVERLAYFS_ERROR_H
+#define FUSE_OVERLAYFS_ERROR_H
 
-# include <config.h>
+#include <config.h>
 
-# ifdef HAVE_ERROR_H
+#ifdef HAVE_ERROR_H
 #  include <error.h>
-# else
-#  define error(status, errno, fmt, ...) do {                           \
-    if (errno == 0)                                                     \
-      fprintf (stderr, "fuse-overlayfs: " fmt "\n", ##__VA_ARGS__);     \
-    else                                                                \
+#else
+#  define error(status, errno, fmt, ...)                                \
+    do                                                                  \
       {                                                                 \
-        fprintf (stderr, "fuse-overlayfs: " fmt, ##__VA_ARGS__);        \
-        fprintf (stderr, ": %s\n", strerror (errno));                   \
-      }                                                                 \
-    if (status)                                                         \
-      exit (status);                                                    \
-  } while(0)
-# endif
+        if (errno == 0)                                                 \
+          fprintf (stderr, "fuse-overlayfs: " fmt "\n", ##__VA_ARGS__); \
+        else                                                            \
+          {                                                             \
+            fprintf (stderr, "fuse-overlayfs: " fmt, ##__VA_ARGS__);    \
+            fprintf (stderr, ": %s\n", strerror (errno));               \
+          }                                                             \
+        if (status)                                                     \
+          exit (status);                                                \
+    } while (0)
+#endif
 
 #endif
