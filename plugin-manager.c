@@ -52,9 +52,9 @@ plugin_load_one (struct ovl_plugin_context *context, const char *path)
   plugin_name name;
   struct ovl_plugin *p;
   plugin_version version;
-  void *handle = dlopen (path, RTLD_NOW|RTLD_LOCAL);
+  void *handle = dlopen (path, RTLD_NOW | RTLD_LOCAL);
   if (! handle)
-    error (EXIT_FAILURE, 0, "cannot load plugin %s: %s", path, dlerror());
+    error (EXIT_FAILURE, 0, "cannot load plugin %s: %s", path, dlerror ());
 
   p = calloc (1, sizeof (*p));
   if (p == NULL)

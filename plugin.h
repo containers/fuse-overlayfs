@@ -17,16 +17,16 @@
 */
 
 #ifndef PLUGIN_H
-# define PLUGIN_H
-# include <config.h>
+#define PLUGIN_H
+#include <config.h>
 
-# include <utils.h>
-# include <fuse-overlayfs.h>
+#include <utils.h>
+#include <fuse-overlayfs.h>
 
-typedef struct data_source *(*plugin_load_data_source)(const char *opaque, const char *path);
-typedef int (*plugin_release)();
-typedef const char *(*plugin_name)();
-typedef int (*plugin_version)();
+typedef struct data_source *(*plugin_load_data_source) (const char *opaque, const char *path);
+typedef int (*plugin_release) ();
+typedef const char *(*plugin_name) ();
+typedef int (*plugin_version) ();
 
 struct ovl_plugin
 {

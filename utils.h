@@ -16,25 +16,25 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #ifndef UTILS_H
-# define UTILS_H
+#define UTILS_H
 
 #ifndef _GNU_SOURCE
-# define _GNU_SOURCE
+#  define _GNU_SOURCE
 #endif
 
-# include <config.h>
-# include <dirent.h>
-# include <fcntl.h>
-# include <limits.h>
-# include <stdio.h>
-# include <stdlib.h>
-# include <sys/types.h>
-# include <unistd.h>
-# include "fuse-overlayfs.h"
+#include <config.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include "fuse-overlayfs.h"
 
-# define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
-# define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
-# define XATTR_OVERRIDE_CONTAINERS_STAT "user.containers.override_stat"
+#define XATTR_OVERRIDE_STAT "user.fuseoverlayfs.override_stat"
+#define XATTR_PRIVILEGED_OVERRIDE_STAT "security.fuseoverlayfs.override_stat"
+#define XATTR_OVERRIDE_CONTAINERS_STAT "user.containers.override_stat"
 
 void cleanup_freep (void *p);
 void cleanup_filep (FILE **f);
@@ -46,17 +46,17 @@ int file_exists_at (int dirfd, const char *pathname);
 int strconcat3 (char *dest, size_t size, const char *s1, const char *s2, const char *s3);
 int open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, int flags);
 
-# define cleanup_file __attribute__((cleanup (cleanup_filep)))
-# define cleanup_free __attribute__((cleanup (cleanup_freep)))
-# define cleanup_close __attribute__((cleanup (cleanup_closep)))
-# define cleanup_dir __attribute__((cleanup (cleanup_dirp)))
+#define cleanup_file __attribute__ ((cleanup (cleanup_filep)))
+#define cleanup_free __attribute__ ((cleanup (cleanup_freep)))
+#define cleanup_close __attribute__ ((cleanup (cleanup_closep)))
+#define cleanup_dir __attribute__ ((cleanup (cleanup_dirp)))
 
-# define LIKELY(x) __builtin_expect((x),1)
-# define UNLIKELY(x) __builtin_expect((x),0)
+#define LIKELY(x) __builtin_expect ((x), 1)
+#define UNLIKELY(x) __builtin_expect ((x), 0)
 
-# ifdef HAVE_STATX
+#ifdef HAVE_STATX
 void statx_to_stat (struct statx *stx, struct stat *st);
-# endif
+#endif
 
 int safe_openat (int dirfd, const char *pathname, int flags, mode_t mode);
 

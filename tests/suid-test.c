@@ -14,13 +14,13 @@ main ()
   unlink ("suid");
   unlink ("nosuid");
 
-  fd = open ("suid", O_WRONLY|O_CREAT|O_EXCL);
+  fd = open ("suid", O_WRONLY | O_CREAT | O_EXCL);
   write (fd, "1", 1);
   fchown (fd, 0, 0);
   fchmod (fd, S_ISUID | 0755);
   close (fd);
 
-  fd = open ("nosuid", O_WRONLY|O_CREAT|O_EXCL);
+  fd = open ("nosuid", O_WRONLY | O_CREAT | O_EXCL);
   write (fd, "1", 1);
   fchown (fd, 0, 0);
   fchmod (fd, S_ISUID | 0755);
