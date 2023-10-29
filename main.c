@@ -5788,18 +5788,36 @@ main (int argc, char *argv[])
           s = fgetxattr (get_upper_layer (&lo)->fd, name, data, sizeof (data));
           if (s < 0)
             {
+              bool found = false;
+              struct ovl_layer *l;
+
               if (errno != ENODATA)
                 error (EXIT_FAILURE, errno, "read xattr `%s` from upperdir", name);
-              else
-                {
-                  struct stat st;
-                  ret = fstat (get_upper_layer (&lo)->fd, &st);
-                  if (ret < 0)
-                    error (EXIT_FAILURE, errno, "stat upperdir");
 
-                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd,
-                                                lo.upperdir,
-                                                st.st_uid, st.st_gid, st.st_mode);
+              for (l = get_lower_layers (&lo); l; l = l->next)
+                {
+                  s = fgetxattr (l->fd, name, data, sizeof (data));
+                  if (s < 0 && errno != ENODATA)
+                    error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                  if (s < 0 && lo.xattr_permissions == 2)
+                    {
+                      s = fgetxattr (l->fd, XATTR_OVERRIDE_CONTAINERS_STAT, data, sizeof (data));
+                      if (s < 0 && errno != ENODATA)
+                        error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                    }
+                  if (s > 0)
+                    {
+                      ret = fsetxattr (get_upper_layer (&lo)->fd, name, data, s, 0);
+                      if (ret < 0)
+                        error (EXIT_FAILURE, errno, "fsetxattr mode to upper layer");
+                      found = true;
+                      break;
+                    }
+                }
+              if (! found)
+                {
+                  /* If the mode is missing, set a standard value.  */
+                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd, lo.upperdir, 0, 0, 0555);
                   if (ret < 0)
                     error (EXIT_FAILURE, errno, "write xattr `%s` to upperdir", name);
                 }
