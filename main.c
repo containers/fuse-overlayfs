@@ -4914,6 +4914,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
   struct fuse_entry_param e;
   const struct fuse_ctx *ctx = fuse_req_ctx (req);
   char wd_tmp_file_name[32];
+  mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_mknod(ino=%" PRIu64 ", name=%s, mode=%d, rdev=%lu)\n",
@@ -4926,9 +4927,6 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     }
 
   mode = mode & ~ctx->umask;
-
-  if (lo->xattr_permissions)
-    mode |= 0755;
 
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && ! node->whiteout)
@@ -4951,7 +4949,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
-  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode, rdev);
+  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, backing_file_mode, rdev);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
