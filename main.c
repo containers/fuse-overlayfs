@@ -3584,6 +3584,7 @@ static int
 direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid, gid_t gid, int flags, mode_t mode)
 {
   struct ovl_data *lo = l->ovl_data;
+  mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
   cleanup_close int fd = -1;
   char wd_tmp_file_name[32];
   int ret;
@@ -3591,7 +3592,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
   /* try to create directly the file if it doesn't need to be chowned.  */
   if (uid == lo->uid && gid == lo->gid && l->stat_override_mode == STAT_OVERRIDE_NONE)
     {
-      ret = TEMP_FAILURE_RETRY (safe_openat (get_upper_layer (lo)->fd, path, flags, mode));
+      ret = TEMP_FAILURE_RETRY (safe_openat (get_upper_layer (lo)->fd, path, flags, backing_file_mode));
       if (ret >= 0)
         return ret;
       /* if it fails (e.g. there is a whiteout) then fallback to create it in
@@ -3600,7 +3601,7 @@ direct_create_file (struct ovl_layer *l, int dirfd, const char *path, uid_t uid,
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  fd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, flags, mode));
+  fd = TEMP_FAILURE_RETRY (safe_openat (lo->workdir_fd, wd_tmp_file_name, flags, backing_file_mode));
   if (fd < 0)
     return -1;
   if (uid != lo->uid || gid != lo->gid || l->stat_override_mode != STAT_OVERRIDE_NONE)
@@ -3713,7 +3714,7 @@ ovl_do_open (fuse_req_t req, fuse_ino_t parent, const char *name, int flags, mod
       uid = get_uid (lo, ctx->uid);
       gid = get_gid (lo, ctx->gid);
 
-      fd = direct_create_file (get_upper_layer (lo), get_upper_layer (lo)->fd, path, uid, gid, flags, (mode & ~ctx->umask) | (lo->xattr_permissions ? 0755 : 0));
+      fd = direct_create_file (get_upper_layer (lo), get_upper_layer (lo)->fd, path, uid, gid, flags, mode & ~ctx->umask);
       if (fd < 0)
         return fd;
 
@@ -3924,9 +3925,6 @@ ovl_create (fuse_req_t req, fuse_ino_t parent, const char *name,
     }
 
   fi->flags = fi->flags | O_CREAT;
-
-  if (lo->xattr_permissions)
-    mode |= 0755;
 
   fd = ovl_do_open (req, parent, name, fi->flags, mode, &node, &st);
   if (fd < 0)
@@ -5790,18 +5788,36 @@ main (int argc, char *argv[])
           s = fgetxattr (get_upper_layer (&lo)->fd, name, data, sizeof (data));
           if (s < 0)
             {
+              bool found = false;
+              struct ovl_layer *l;
+
               if (errno != ENODATA)
                 error (EXIT_FAILURE, errno, "read xattr `%s` from upperdir", name);
-              else
-                {
-                  struct stat st;
-                  ret = fstat (get_upper_layer (&lo)->fd, &st);
-                  if (ret < 0)
-                    error (EXIT_FAILURE, errno, "stat upperdir");
 
-                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd,
-                                                lo.upperdir,
-                                                st.st_uid, st.st_gid, st.st_mode);
+              for (l = get_lower_layers (&lo); l; l = l->next)
+                {
+                  s = fgetxattr (l->fd, name, data, sizeof (data));
+                  if (s < 0 && errno != ENODATA)
+                    error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                  if (s < 0 && lo.xattr_permissions == 2)
+                    {
+                      s = fgetxattr (l->fd, XATTR_OVERRIDE_CONTAINERS_STAT, data, sizeof (data));
+                      if (s < 0 && errno != ENODATA)
+                        error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                    }
+                  if (s > 0)
+                    {
+                      ret = fsetxattr (get_upper_layer (&lo)->fd, name, data, s, 0);
+                      if (ret < 0)
+                        error (EXIT_FAILURE, errno, "fsetxattr mode to upper layer");
+                      found = true;
+                      break;
+                    }
+                }
+              if (! found)
+                {
+                  /* If the mode is missing, set a standard value.  */
+                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd, lo.upperdir, 0, 0, 0555);
                   if (ret < 0)
                     error (EXIT_FAILURE, errno, "write xattr `%s` to upperdir", name);
                 }
