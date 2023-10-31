@@ -2864,9 +2864,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   cleanup_free char *buf = NULL;
   char wd_tmp_file_name[32];
   bool need_rename;
-
-  if (lo->xattr_permissions)
-    mode |= 0755;
+  mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
 
   need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
   if (! need_rename)
@@ -2890,7 +2888,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
 
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
 
-  ret = mkdirat (lo->workdir_fd, wd_tmp_file_name, mode);
+  ret = mkdirat (lo->workdir_fd, wd_tmp_file_name, backing_file_mode);
   if (ret < 0)
     goto out;
 
@@ -4914,6 +4912,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
   struct fuse_entry_param e;
   const struct fuse_ctx *ctx = fuse_req_ctx (req);
   char wd_tmp_file_name[32];
+  mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
 
   if (UNLIKELY (ovl_debug (req)))
     fprintf (stderr, "ovl_mknod(ino=%" PRIu64 ", name=%s, mode=%d, rdev=%lu)\n",
@@ -4926,9 +4925,6 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
     }
 
   mode = mode & ~ctx->umask;
-
-  if (lo->xattr_permissions)
-    mode |= 0755;
 
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && ! node->whiteout)
@@ -4951,7 +4947,7 @@ ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev
       return;
     }
   sprintf (wd_tmp_file_name, "%lu", get_next_wd_counter ());
-  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, mode, rdev);
+  ret = mknodat (lo->workdir_fd, wd_tmp_file_name, backing_file_mode, rdev);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
@@ -5055,8 +5051,6 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       fuse_reply_err (req, ENAMETOOLONG);
       return;
     }
-  if (lo->xattr_permissions)
-    mode |= 0755;
 
   node = do_lookup_file (lo, parent, name);
   if (node != NULL && ! node->whiteout)
