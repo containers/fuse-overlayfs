@@ -2866,7 +2866,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   bool need_rename;
   mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
 
-  need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid;
+  need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->stat_override_mode != STAT_OVERRIDE_NONE;
   if (! need_rename)
     {
       /* mkdir can be used directly without a temporary directory in the working directory.  */
@@ -2937,6 +2937,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
       ret = fstat (dfd, st_out);
       if (ret < 0)
         goto out;
+      st_out->st_mode = (st_out->st_mode & S_IFMT) | (mode & ~S_IFMT);
     }
 
   ret = inherit_acl (lo, parent, dfd, NULL);
@@ -3008,6 +3009,9 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
 
   times[0] = st.st_atim;
   times[1] = st.st_mtim;
+
+  if (override_mode (src->layer, sfd, NULL, NULL, &st) < 0 && errno != ENODATA && errno != EOPNOTSUPP)
+    return -1;
 
   ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
   if (ret == 0)
