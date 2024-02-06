@@ -375,7 +375,7 @@ read_mappings (const char *str)
 
           tmp = malloc (sizeof (*tmp));
           if (tmp == NULL)
-            return NULL;
+            error (EXIT_FAILURE, errno, "cannot allocate memory");
           tmp->next = ret;
           tmp->host = a;
           tmp->to = b;
@@ -3102,6 +3102,10 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
     {
       size_t current_size = PATH_MAX + 1;
       cleanup_free char *p = malloc (current_size);
+      if (p == NULL) {
+        ret = -1;
+        goto exit;
+      }
 
       while (1)
         {
@@ -3115,8 +3119,10 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
 
           current_size = current_size * 2;
           new = realloc (p, current_size);
-          if (new == NULL)
+          if (new == NULL) {
+            ret = -1;
             goto exit;
+          }
           p = new;
         }
       p[ret] = '\0';
@@ -3142,8 +3148,10 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
     }
 
   buf = malloc (buf_size);
-  if (buf == NULL)
+  if (buf == NULL) {
+    ret = -1;
     goto exit;
+  }
 
   if (support_reflinks)
     {
@@ -4755,12 +4763,10 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
 
   node->loaded = 0;
 
-  ret = 0;
   fuse_reply_err (req, 0);
   return;
 
 error:
-  ret = -1;
   fuse_reply_err (req, errno);
 }
 
@@ -5536,6 +5542,10 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
         free (ovl_data->mountpoint);
 
       ovl_data->mountpoint = strdup (arg);
+      if (ovl_data->mountpoint == NULL) {
+        fprintf (stderr, "cannot allocate memory\n");
+        return -1;
+      }
       return 0;
     }
   /* Ignore unknown arguments.  */
@@ -5589,6 +5599,8 @@ load_default_plugins ()
 {
   DIR *dp = NULL;
   char *plugins = strdup ("");
+  if (plugins == NULL)
+    error (EXIT_FAILURE, errno, "cannot allocate memory");
 
   dp = opendir (PKGLIBEXECDIR);
   if (dp == NULL)
@@ -5839,8 +5851,10 @@ main (int argc, char *argv[])
       cleanup_free char *path = NULL;
 
       path = realpath (lo.workdir, NULL);
-      if (path == NULL)
+      if (path == NULL) {
+        ret = -1;
         goto err_out1;
+      }
       mkdir (path, 0700);
       path = realloc (path, strlen (path) + strlen ("/work") + 1);
       if (! path)
@@ -5870,11 +5884,13 @@ main (int argc, char *argv[])
   if (se == NULL)
     {
       error (0, errno, "cannot create FUSE session");
+      ret = -1;
       goto err_out1;
     }
   if (fuse_set_signal_handlers (se) != 0)
     {
       error (0, errno, "cannot set signal handler");
+      ret = -1;
       goto err_out2;
     }
 
@@ -5883,6 +5899,7 @@ main (int argc, char *argv[])
   if (fuse_session_mount (se, lo.mountpoint) != 0)
     {
       error (0, errno, "cannot mount");
+      ret = -1;
       goto err_out3;
     }
   fuse_daemonize (opts.foreground);
