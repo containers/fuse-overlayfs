@@ -1092,7 +1092,7 @@ direct_renameat2 (int olddirfd, const char *oldpath,
 static int
 hide_node (struct ovl_data *lo, struct ovl_node *node, bool unlink_src)
 {
-  char *newpath = NULL;
+  cleanup_free char *newpath = NULL;
   int ret;
 
   ret = asprintf (&newpath, "%lu", get_next_wd_counter ());
