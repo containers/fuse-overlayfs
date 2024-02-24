@@ -1,0 +1,54 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: "9 4 * * 5"
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ cpp ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xz-utils ninja-build meson libudev-dev libudev1 udev
+
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure PKG_CONFIG_PATH=$RUNNER_TEMP/usr/lib/x86_64-linux-gnu/pkgconfig
+
+      - name: After Prepare
+        run: (wget https://github.com/libfuse/libfuse/releases/download/fuse-3.6.2/fuse-3.6.2.tar.xz; tar xf fuse-3.6.2.tar.xz; cd fuse-3.6.2; mkdir build; cd build; meson .. --prefix $RUNNER_TEMP/usr && ninja && ninja -j1 install || true)
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: "/language:${{ matrix.language }}"
