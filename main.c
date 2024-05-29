@@ -622,22 +622,32 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
 #define fchownat ERROR
 
 static int
-do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
+do_stat (struct ovl_node *node, int fd, const char *path, struct stat *st)
+{
+  struct ovl_layer *l = node->layer;
+
+  if (fd >= 0)
+    return l->ds->fstat (l, fd, path, STATX_BASIC_STATS, st);
+
+  if (path != NULL)
+    return stat (path, st);
+
+  if (node->hidden)
+    return fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
+
+  return l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
+}
+
+static int
+do_fchmod (struct ovl_data *lo, struct ovl_node *node, int fd, mode_t mode)
 {
   if (lo->xattr_permissions)
     {
-      struct ovl_layer *upper = get_upper_layer (lo);
       struct stat st;
-
-      if (upper == NULL)
-        {
-          errno = EROFS;
-          return -1;
-        }
 
       st.st_uid = 0;
       st.st_gid = 0;
-      if (override_mode (upper, fd, NULL, NULL, &st) < 0 && errno != ENODATA)
+      if (do_stat (node, fd, NULL, &st) < 0)
         return -1;
 
       return write_permission_xattr (lo, fd, NULL, st.st_uid, st.st_gid, mode);
@@ -648,22 +658,15 @@ do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
 #define fchmod ERROR
 
 static int
-do_chmod (struct ovl_data *lo, const char *path, mode_t mode)
+do_chmod (struct ovl_data *lo, struct ovl_node *node, const char *path, mode_t mode)
 {
   if (lo->xattr_permissions)
     {
-      struct ovl_layer *upper = get_upper_layer (lo);
       struct stat st;
-
-      if (upper == NULL)
-        {
-          errno = EROFS;
-          return -1;
-        }
 
       st.st_uid = 0;
       st.st_gid = 0;
-      if (override_mode (upper, -1, path, NULL, &st) < 0 && errno != ENODATA)
+      if (do_stat (node, -1, path, &st) < 0)
         return -1;
 
       return write_permission_xattr (lo, -1, path, st.st_uid, st.st_gid, mode);
@@ -921,14 +924,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   if (st_in)
     memcpy (st, st_in, sizeof (*st));
-  else if (fd >= 0)
-    ret = l->ds->fstat (l, fd, path, STATX_BASIC_STATS, st);
-  else if (path != NULL)
-    ret = stat (path, st);
-  else if (node->hidden)
-    ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
   else
-    ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
+    ret = do_stat (node, fd, path, st);
 
   if (ret < 0)
     return ret;
@@ -3823,7 +3820,7 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
   /* if it is a writepage request, make sure to restore the setuid bit.  */
   if (fi->writepage && (inode->mode & (S_ISUID | S_ISGID)))
     {
-      if (do_fchmod (lo, fi->fh, inode->mode) < 0)
+      if (do_fchmod (lo, inode->node, fi->fh, inode->mode) < 0)
         {
           fuse_reply_err (req, errno);
           return;
@@ -4135,9 +4132,9 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   if (to_set & FUSE_SET_ATTR_MODE)
     {
       if (fd >= 0)
-        ret = do_fchmod (lo, fd, attr->st_mode);
+        ret = do_fchmod (lo, node, fd, attr->st_mode);
       else
-        ret = do_chmod (lo, path, attr->st_mode);
+        ret = do_chmod (lo, node, path, attr->st_mode);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
