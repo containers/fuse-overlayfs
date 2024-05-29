@@ -4158,6 +4158,24 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   if (uid != -1 || gid != -1)
     {
+      struct stat st;
+
+      if (do_stat (node, fd, NULL, &st) < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+
+      if (uid == -1)
+        {
+          uid = st.st_uid;
+        }
+
+      if (gid == -1)
+        {
+          gid = st.st_gid;
+        }
+
       if (fd >= 0)
         ret = do_fchown (lo, fd, uid, gid, node->ino->mode);
       else
