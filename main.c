@@ -539,17 +539,21 @@ write_permission_xattr (struct ovl_data *lo, int fd, const char *path, uid_t uid
   int ret;
   const char *name = NULL;
 
-  switch (lo->xattr_permissions)
+  switch (get_upper_layer (lo)->stat_override_mode)
     {
-    case 0:
+    case STAT_OVERRIDE_NONE:
       return 0;
 
-    case 1:
+    case STAT_OVERRIDE_USER:
+      name = XATTR_OVERRIDE_STAT;
+      break;
+
+    case STAT_OVERRIDE_PRIVILEGED:
       name = XATTR_PRIVILEGED_OVERRIDE_STAT;
       break;
 
-    case 2:
-      name = XATTR_OVERRIDE_STAT;
+    case STAT_OVERRIDE_CONTAINERS:
+      name = XATTR_OVERRIDE_CONTAINERS_STAT;
       break;
 
     default:
@@ -5792,13 +5796,22 @@ main (int argc, char *argv[])
             }
           else if (lo.xattr_permissions == 2)
             {
-              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_USER;
-              name = XATTR_OVERRIDE_STAT;
+              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_CONTAINERS;
+              name = XATTR_OVERRIDE_CONTAINERS_STAT;
             }
           else
             error (EXIT_FAILURE, 0, "invalid value for xattr_permissions");
 
           s = fgetxattr (get_upper_layer (&lo)->fd, name, data, sizeof (data));
+          if (s < 0 && errno == ENODATA && lo.xattr_permissions == 2)
+            {
+              s = fgetxattr (get_upper_layer (&lo)->fd, XATTR_OVERRIDE_STAT, data, sizeof (data));
+              if (s >= 0)
+                {
+                  get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_USER;
+                  name = XATTR_OVERRIDE_STAT;
+                }
+            }
           if (s < 0)
             {
               bool found = false;
@@ -5809,15 +5822,19 @@ main (int argc, char *argv[])
 
               for (l = get_lower_layers (&lo); l; l = l->next)
                 {
-                  s = fgetxattr (l->fd, name, data, sizeof (data));
-                  if (s < 0 && errno != ENODATA)
-                    error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
-                  if (s < 0 && lo.xattr_permissions == 2)
+                  switch (lo.xattr_permissions)
                     {
+                    case 1:
+                      s = fgetxattr (l->fd, name, data, sizeof (data));
+                      break;
+
+                    case 2:
                       s = fgetxattr (l->fd, XATTR_OVERRIDE_CONTAINERS_STAT, data, sizeof (data));
-                      if (s < 0 && errno != ENODATA)
-                        error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                      if (s < 0 && errno == ENODATA)
+                        s = fgetxattr (l->fd, XATTR_OVERRIDE_STAT, data, sizeof (data));
+                      break;
                     }
+
                   if (s > 0)
                     {
                       ret = fsetxattr (get_upper_layer (&lo)->fd, name, data, s, 0);

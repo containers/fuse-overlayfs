@@ -6,12 +6,12 @@ import stat
 import errno
 
 XATTR_OVERRIDE_STAT_PRIVILEGED = "security.fuseoverlayfs.override_stat"
-XATTR_OVERRIDE_STAT = "user.fuseoverlayfs.override_stat"
+XATTR_OVERRIDE_CONTAINERS_STAT = "user.fuseoverlayfs.override_stat"
 
 if os.geteuid() == 0:
     xattr_name = XATTR_OVERRIDE_STAT_PRIVILEGED
 else:
-    xattr_name = XATTR_OVERRIDE_STAT
+    xattr_name = XATTR_OVERRIDE_CONTAINERS_STAT
 
 cwd_fd = os.open(".", os.O_PATH)
 
