@@ -23,7 +23,7 @@ def fix_path(path):
         os.setxattr(path, xattr_name, str.encode(content), flags=os.XATTR_CREATE, follow_symlinks=False)
     except Exception as e:
         if e.errno == errno.EEXIST:
-            print("attr %s already present for %s: %s" % (XATTR_OVERRIDE_STAT, path, e.errno))
+            print("attr %s already present for %s: %s" % (xattr_name, path, e.errno))
             return
         raise e
 
