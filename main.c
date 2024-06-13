@@ -141,6 +141,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
 #define XATTR_CONTAINERS_PREFIX "user.containers."
+#define XATTR_CONTAINERS_OVERRIDE_PREFIX "user.containers.override_"
 #define UNPRIVILEGED_XATTR_PREFIX "user.overlay."
 #define UNPRIVILEGED_OPAQUE_XATTR "user.overlay.opaque"
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
@@ -529,6 +530,39 @@ can_access_xattr (const char *name)
   return ! has_prefix (name, XATTR_PREFIX)
          && ! has_prefix (name, PRIVILEGED_XATTR_PREFIX)
          && ! has_prefix (name, UNPRIVILEGED_XATTR_PREFIX);
+}
+
+static bool encoded_xattr_name (const char *name)
+{
+  return has_prefix (name, XATTR_CONTAINERS_OVERRIDE_PREFIX) &&
+         ! can_access_xattr (name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
+}
+
+static const char *decode_xattr_name (const char *name)
+{
+  if (encoded_xattr_name (name))
+    return name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1;
+
+  if (can_access_xattr (name))
+    return name;
+
+  return NULL;
+}
+
+static const char *encode_xattr_name (const struct ovl_layer *l, char *buf,
+                                      const char *name)
+{
+  if (can_access_xattr (name))
+    return name;
+
+  if (l->stat_override_mode != STAT_OVERRIDE_CONTAINERS ||
+      strlen(name) > XATTR_NAME_MAX + 1 - sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX))
+    return NULL;
+
+  strcpy(buf, XATTR_CONTAINERS_OVERRIDE_PREFIX);
+  strcpy(buf + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1, name);
+
+  return buf;
 }
 
 static ssize_t
@@ -2606,7 +2640,10 @@ filter_xattrs_list (char *buf, ssize_t len)
         }
       else
         {
-          char *next = it + it_len;
+          char *next = it;
+
+          next += encoded_xattr_name (it) ?
+                  sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1 : it_len;
 
           memmove (it, next, buf + len - next);
           len -= it_len;
@@ -2681,7 +2718,8 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   ssize_t len;
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
-  cleanup_free char *buf = NULL;
+  cleanup_free char *value_buf = NULL;
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -2693,12 +2731,6 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
-  if (! can_access_xattr (name))
-    {
-      fuse_reply_err (req, ENODATA);
-      return;
-    }
-
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
     {
@@ -2706,10 +2738,17 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
+  name = encode_xattr_name (node->layer, name_buf, name);
+  if (!name)
+    {
+      fuse_reply_err (req, ENODATA);
+      return;
+    }
+
   if (size > 0)
     {
-      buf = malloc (size);
-      if (buf == NULL)
+      value_buf = malloc (size);
+      if (value_buf == NULL)
         {
           fuse_reply_err (req, errno);
           return;
@@ -2717,12 +2756,12 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
     }
 
   if (! node->hidden)
-    ret = node->layer->ds->getxattr (node->layer, node->path, name, buf, size);
+    ret = node->layer->ds->getxattr (node->layer, node->path, name, value_buf, size);
   else
     {
       char path[PATH_MAX];
       strconcat3 (path, PATH_MAX, lo->workdir, "/", node->path);
-      ret = getxattr (path, name, buf, size);
+      ret = getxattr (path, name, value_buf, size);
     }
 
   if (ret < 0)
@@ -2736,7 +2775,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   if (size == 0)
     fuse_reply_xattr (req, len);
   else
-    fuse_reply_buf (req, buf, len);
+    fuse_reply_buf (req, value_buf, len);
 }
 
 static void
@@ -2757,7 +2796,8 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 }
 
 static int
-copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
+copy_xattr (int sfd,
+            const struct ovl_layer *dl, int dfd, char *buf, size_t buf_size)
 {
   ssize_t xattr_len;
 
@@ -2768,9 +2808,16 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
       for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
         {
           cleanup_free char *v = NULL;
+          const char *decoded_name = decode_xattr_name (it);
+          const char *encoded_name;
+          char buf[XATTR_NAME_MAX + 1];
           ssize_t s;
 
-          if (! can_access_xattr (it))
+          if (! decoded_name)
+            continue;
+
+          encoded_name = encode_xattr_name (dl, buf, decoded_name);
+          if (! encoded_name)
             continue;
 
           s = safe_read_xattr (&v, sfd, it, 256);
@@ -2781,7 +2828,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
               return -1;
             }
 
-          if (fsetxattr (dfd, it, v, s, 0) < 0)
+          if (fsetxattr (dfd, encoded_name, v, s, 0) < 0)
             {
               if (errno == EINVAL || errno == EOPNOTSUPP)
                 continue;
@@ -2921,7 +2968,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
           goto out;
         }
 
-      ret = copy_xattr (xattr_sfd, dfd, buf, buf_size);
+      ret = copy_xattr (xattr_sfd, get_upper_layer (lo), dfd, buf, buf_size);
       if (ret < 0)
         goto out;
     }
@@ -3193,7 +3240,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (ret < 0)
     goto exit;
 
-  ret = copy_xattr (sfd, dfd, buf, buf_size);
+  ret = copy_xattr (sfd, get_upper_layer (lo), dfd, buf, buf_size);
   if (ret < 0)
     goto exit;
 
@@ -3473,6 +3520,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node;
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -3482,12 +3530,6 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   if (lo->disable_xattrs)
     {
       fuse_reply_err (req, ENOSYS);
-      return;
-    }
-
-  if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX) || has_prefix (name, XATTR_CONTAINERS_PREFIX))
-    {
-      fuse_reply_err (req, EPERM);
       return;
     }
 
@@ -3504,6 +3546,13 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+
+    name = encode_xattr_name (node->layer, name_buf, name);
+    if (!name)
+      {
+        fuse_reply_err (req, EPERM);
+        return;
+      }
 
   if (! node->hidden)
     ret = direct_setxattr (node->layer, node->path, name, value, size, flags);
@@ -3546,6 +3595,7 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
   cleanup_lock int l = enter_big_lock ();
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -3564,6 +3614,13 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       fuse_reply_err (req, errno);
       return;
     }
+
+    name = encode_xattr_name (node->layer, name_buf, name);
+    if (!name)
+      {
+        fuse_reply_err (req, EPERM);
+        return;
+      }
 
   if (! node->hidden)
     ret = direct_removexattr (node->layer, node->path, name);
