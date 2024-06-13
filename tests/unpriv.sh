@@ -35,8 +35,14 @@ rm -rf lower upper workdir merged
 mkdir lower upper workdir merged
 
 touch upper/file
+unshare -r setcap cap_net_admin+ep upper/file
 
 fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir,xattr_permissions=2 merged
+
+# Ensure the security xattr namespace is isolated.
+test "$(unshare -r getcap merged/file)" = ''
+unshare -r setcap cap_net_admin+ep merged/file
+test "$(unshare -r getcap merged/file)" = 'merged/file cap_net_admin=ep'
 
 # Ensure UID is preserved with chgrp.
 podman unshare chgrp 1 merged/file

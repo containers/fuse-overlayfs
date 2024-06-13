@@ -59,6 +59,7 @@
 #include <sys/sysmacros.h>
 #include <sys/xattr.h>
 #include <linux/fs.h>
+#include <linux/xattr.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <pthread.h>
@@ -525,25 +526,27 @@ has_prefix (const char *str, const char *pref)
 }
 
 static bool
-can_access_xattr (const char *name)
+can_access_xattr (const struct ovl_layer *l, const char *name)
 {
-  return ! has_prefix (name, XATTR_PREFIX)
-         && ! has_prefix (name, PRIVILEGED_XATTR_PREFIX)
-         && ! has_prefix (name, UNPRIVILEGED_XATTR_PREFIX);
+  return ! (has_prefix (name, XATTR_PREFIX)
+            || has_prefix (name, PRIVILEGED_XATTR_PREFIX)
+            || has_prefix (name, UNPRIVILEGED_XATTR_PREFIX)
+            || (l->stat_override_mode == STAT_OVERRIDE_CONTAINERS &&
+                has_prefix (name, XATTR_SECURITY_PREFIX)));
 }
 
-static bool encoded_xattr_name (const char *name)
+static bool encoded_xattr_name (const struct ovl_layer *l, const char *name)
 {
   return has_prefix (name, XATTR_CONTAINERS_OVERRIDE_PREFIX) &&
-         ! can_access_xattr (name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
+         ! can_access_xattr (l, name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
 }
 
-static const char *decode_xattr_name (const char *name)
+static const char *decode_xattr_name (const struct ovl_layer *l, const char *name)
 {
-  if (encoded_xattr_name (name))
+  if (encoded_xattr_name (l, name))
     return name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1;
 
-  if (can_access_xattr (name))
+  if (can_access_xattr (l, name))
     return name;
 
   return NULL;
@@ -552,7 +555,7 @@ static const char *decode_xattr_name (const char *name)
 static const char *encode_xattr_name (const struct ovl_layer *l, char *buf,
                                       const char *name)
 {
-  if (can_access_xattr (name))
+  if (can_access_xattr (l, name))
     return name;
 
   if (l->stat_override_mode != STAT_OVERRIDE_CONTAINERS ||
@@ -2617,7 +2620,7 @@ inherit_acl (struct ovl_data *lo, struct ovl_node *parent, int targetfd, const c
 
 /* in-place filter xattrs that cannot be accessed.  */
 static ssize_t
-filter_xattrs_list (char *buf, ssize_t len)
+filter_xattrs_list (struct ovl_layer *l, char *buf, ssize_t len)
 {
   ssize_t ret = 0;
   char *it;
@@ -2633,7 +2636,7 @@ filter_xattrs_list (char *buf, ssize_t len)
 
       it_len = strlen (it) + 1;
 
-      if (can_access_xattr (it))
+      if (can_access_xattr (l, it))
         {
           it += it_len;
           ret += it_len;
@@ -2642,7 +2645,7 @@ filter_xattrs_list (char *buf, ssize_t len)
         {
           char *next = it;
 
-          next += encoded_xattr_name (it) ?
+          next += encoded_xattr_name (l, it) ?
                   sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1 : it_len;
 
           memmove (it, next, buf + len - next);
@@ -2703,7 +2706,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
-  len = filter_xattrs_list (buf, ret);
+  len = filter_xattrs_list (node->layer, buf, ret);
 
   if (size == 0)
     fuse_reply_xattr (req, len);
@@ -2796,7 +2799,7 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 }
 
 static int
-copy_xattr (int sfd,
+copy_xattr (const struct ovl_layer *sl, int sfd,
             const struct ovl_layer *dl, int dfd, char *buf, size_t buf_size)
 {
   ssize_t xattr_len;
@@ -2808,7 +2811,7 @@ copy_xattr (int sfd,
       for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
         {
           cleanup_free char *v = NULL;
-          const char *decoded_name = decode_xattr_name (it);
+          const char *decoded_name = decode_xattr_name (sl, it);
           const char *encoded_name;
           char buf[XATTR_NAME_MAX + 1];
           ssize_t s;
@@ -2904,7 +2907,8 @@ static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 
 static int
 create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
-                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
+                  struct ovl_node *parent, struct ovl_layer *sl, int xattr_sfd,
+                  uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
 {
   int ret;
   int saved_errno;
@@ -2968,7 +2972,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
           goto out;
         }
 
-      ret = copy_xattr (xattr_sfd, get_upper_layer (lo), dfd, buf, buf_size);
+      ret = copy_xattr (sl, xattr_sfd, get_upper_layer (lo), dfd, buf, buf_size);
       if (ret < 0)
         goto out;
     }
@@ -3061,7 +3065,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   if (override_mode (src->layer, sfd, NULL, NULL, &st) < 0 && errno != ENODATA && errno != EOPNOTSUPP)
     return -1;
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, src->layer, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
   if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
@@ -3240,7 +3244,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (ret < 0)
     goto exit;
 
-  ret = copy_xattr (sfd, get_upper_layer (lo), dfd, buf, buf_size);
+  ret = copy_xattr (node->layer, sfd, get_upper_layer (lo), dfd, buf, buf_size);
   if (ret < 0)
     goto exit;
 
@@ -5165,7 +5169,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
+  ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, NULL, -1,
                           get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask,
                           true, &st);
   if (ret < 0)
