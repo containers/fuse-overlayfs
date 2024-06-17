@@ -45,17 +45,10 @@ umount merged
 rm -rf workdir lower upper
 mkdir upper workdir lower
 
-fuse-overlayfs -o sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
-
-# https://github.com/containers/fuse-overlayfs/issues/86
-docker run --rm -v $(pwd)/merged:/merged quay.io/centos/centos:stream8 yum --installroot /merged -y --releasever 8 install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-
-umount merged
-
 # fast_ino_check
 fuse-overlayfs -o fast_ino_check=1,sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
 
-docker run --rm -v $(pwd)/merged:/merged quay.io/centos/centos:stream8 yum --installroot /merged -y --releasever 8 install nano
+docker run --rm -v $(pwd)/merged:/merged fedora dnf --installroot /merged --releasever 30 install -y glibc-common gedit
 
 mkdir merged/a-directory
 
