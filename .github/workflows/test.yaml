@@ -4,20 +4,20 @@ on: [push, pull_request]
 
 jobs:
   build_job:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     name: Build on ${{ matrix.arch }}
 
     strategy:
       matrix:
         include:
           - arch: armv7
-            distro: ubuntu20.04
+            distro: ubuntu22.04
           - arch: aarch64
-            distro: ubuntu20.04
+            distro: ubuntu22.04
           - arch: s390x
-            distro: ubuntu20.04
+            distro: ubuntu22.04
           - arch: ppc64le
-            distro: ubuntu20.04
+            distro: ubuntu22.04
     steps:
       - uses: actions/checkout@v2.1.0
       - uses: uraimo/run-on-arch-action@v2.7.2
@@ -34,7 +34,7 @@ jobs:
 
           install: |
             apt-get update -q -y
-            apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3.8 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel libfuse3-dev bats
+            apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel libfuse3-dev bats
 
           run: |
             ./autogen.sh
@@ -49,7 +49,7 @@ jobs:
             fuse-overlayfs
 
   Test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +66,7 @@ jobs:
     - name: install dependencies
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3.8 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel wget libfuse3-dev bats
+            sudo apt-get install -q -y attr automake autotools-dev git make gcc pkg-config xz-utils python3 g++ python3-setuptools libdevmapper-dev btrfs-progs libbtrfs-dev go-md2man parallel wget libfuse3-dev bats
 
             sudo mkdir -p /lower /upper /mnt $GOPATH/src/github.com/containers
             sudo sh -c "cd $GOPATH/src/github.com/containers; git clone --depth=1 https://github.com/containers/storage"
@@ -90,7 +90,7 @@ jobs:
     - name: Archive build artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: fuse-overlayfs-x86_64-ubuntu20.04
+        name: fuse-overlayfs-x86_64-ubuntu22.04
         path: |
           fuse-overlayfs
       if: ${{ matrix.test == 'ovl-whiteouts' }}
