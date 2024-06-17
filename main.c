@@ -59,6 +59,7 @@
 #include <sys/sysmacros.h>
 #include <sys/xattr.h>
 #include <linux/fs.h>
+#include <linux/xattr.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <pthread.h>
@@ -141,6 +142,7 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #define ORIGIN_XATTR "user.fuseoverlayfs.origin"
 #define OPAQUE_XATTR "user.fuseoverlayfs.opaque"
 #define XATTR_CONTAINERS_PREFIX "user.containers."
+#define XATTR_CONTAINERS_OVERRIDE_PREFIX "user.containers.override_"
 #define UNPRIVILEGED_XATTR_PREFIX "user.overlay."
 #define UNPRIVILEGED_OPAQUE_XATTR "user.overlay.opaque"
 #define PRIVILEGED_XATTR_PREFIX "trusted.overlay."
@@ -524,11 +526,46 @@ has_prefix (const char *str, const char *pref)
 }
 
 static bool
-can_access_xattr (const char *name)
+can_access_xattr (const struct ovl_layer *l, const char *name)
 {
-  return ! has_prefix (name, XATTR_PREFIX)
-         && ! has_prefix (name, PRIVILEGED_XATTR_PREFIX)
-         && ! has_prefix (name, UNPRIVILEGED_XATTR_PREFIX);
+  return ! (has_prefix (name, XATTR_PREFIX)
+            || has_prefix (name, PRIVILEGED_XATTR_PREFIX)
+            || has_prefix (name, UNPRIVILEGED_XATTR_PREFIX)
+            || (l->stat_override_mode == STAT_OVERRIDE_CONTAINERS &&
+                has_prefix (name, XATTR_SECURITY_PREFIX)));
+}
+
+static bool encoded_xattr_name (const struct ovl_layer *l, const char *name)
+{
+  return has_prefix (name, XATTR_CONTAINERS_OVERRIDE_PREFIX) &&
+         ! can_access_xattr (l, name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
+}
+
+static const char *decode_xattr_name (const struct ovl_layer *l, const char *name)
+{
+  if (encoded_xattr_name (l, name))
+    return name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1;
+
+  if (can_access_xattr (l, name))
+    return name;
+
+  return NULL;
+}
+
+static const char *encode_xattr_name (const struct ovl_layer *l, char *buf,
+                                      const char *name)
+{
+  if (can_access_xattr (l, name))
+    return name;
+
+  if (l->stat_override_mode != STAT_OVERRIDE_CONTAINERS ||
+      strlen(name) > XATTR_NAME_MAX + 1 - sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX))
+    return NULL;
+
+  strcpy(buf, XATTR_CONTAINERS_OVERRIDE_PREFIX);
+  strcpy(buf + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1, name);
+
+  return buf;
 }
 
 static ssize_t
@@ -539,17 +576,21 @@ write_permission_xattr (struct ovl_data *lo, int fd, const char *path, uid_t uid
   int ret;
   const char *name = NULL;
 
-  switch (lo->xattr_permissions)
+  switch (get_upper_layer (lo)->stat_override_mode)
     {
-    case 0:
+    case STAT_OVERRIDE_NONE:
       return 0;
 
-    case 1:
+    case STAT_OVERRIDE_USER:
+      name = XATTR_OVERRIDE_STAT;
+      break;
+
+    case STAT_OVERRIDE_PRIVILEGED:
       name = XATTR_PRIVILEGED_OVERRIDE_STAT;
       break;
 
-    case 2:
-      name = XATTR_OVERRIDE_STAT;
+    case STAT_OVERRIDE_CONTAINERS:
+      name = XATTR_OVERRIDE_CONTAINERS_STAT;
       break;
 
     default:
@@ -622,22 +663,32 @@ do_fchownat (struct ovl_data *lo, int dfd, const char *path, uid_t uid, gid_t gi
 #define fchownat ERROR
 
 static int
-do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
+do_stat (struct ovl_node *node, int fd, const char *path, struct stat *st)
+{
+  struct ovl_layer *l = node->layer;
+
+  if (fd >= 0)
+    return l->ds->fstat (l, fd, path, STATX_BASIC_STATS, st);
+
+  if (path != NULL)
+    return stat (path, st);
+
+  if (node->hidden)
+    return fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
+
+  return l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
+}
+
+static int
+do_fchmod (struct ovl_data *lo, struct ovl_node *node, int fd, mode_t mode)
 {
   if (lo->xattr_permissions)
     {
-      struct ovl_layer *upper = get_upper_layer (lo);
       struct stat st;
-
-      if (upper == NULL)
-        {
-          errno = EROFS;
-          return -1;
-        }
 
       st.st_uid = 0;
       st.st_gid = 0;
-      if (override_mode (upper, fd, NULL, NULL, &st) < 0 && errno != ENODATA)
+      if (do_stat (node, fd, NULL, &st) < 0)
         return -1;
 
       return write_permission_xattr (lo, fd, NULL, st.st_uid, st.st_gid, mode);
@@ -648,22 +699,15 @@ do_fchmod (struct ovl_data *lo, int fd, mode_t mode)
 #define fchmod ERROR
 
 static int
-do_chmod (struct ovl_data *lo, const char *path, mode_t mode)
+do_chmod (struct ovl_data *lo, struct ovl_node *node, const char *path, mode_t mode)
 {
   if (lo->xattr_permissions)
     {
-      struct ovl_layer *upper = get_upper_layer (lo);
       struct stat st;
-
-      if (upper == NULL)
-        {
-          errno = EROFS;
-          return -1;
-        }
 
       st.st_uid = 0;
       st.st_gid = 0;
-      if (override_mode (upper, -1, path, NULL, &st) < 0 && errno != ENODATA)
+      if (do_stat (node, -1, path, &st) < 0)
         return -1;
 
       return write_permission_xattr (lo, -1, path, st.st_uid, st.st_gid, mode);
@@ -921,14 +965,8 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   if (st_in)
     memcpy (st, st_in, sizeof (*st));
-  else if (fd >= 0)
-    ret = l->ds->fstat (l, fd, path, STATX_BASIC_STATS, st);
-  else if (path != NULL)
-    ret = stat (path, st);
-  else if (node->hidden)
-    ret = fstatat (node_dirfd (node), node->path, st, AT_SYMLINK_NOFOLLOW);
   else
-    ret = l->ds->statat (l, node->path, st, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
+    ret = do_stat (node, fd, path, st);
 
   if (ret < 0)
     return ret;
@@ -2582,7 +2620,7 @@ inherit_acl (struct ovl_data *lo, struct ovl_node *parent, int targetfd, const c
 
 /* in-place filter xattrs that cannot be accessed.  */
 static ssize_t
-filter_xattrs_list (char *buf, ssize_t len)
+filter_xattrs_list (struct ovl_layer *l, char *buf, ssize_t len)
 {
   ssize_t ret = 0;
   char *it;
@@ -2598,14 +2636,17 @@ filter_xattrs_list (char *buf, ssize_t len)
 
       it_len = strlen (it) + 1;
 
-      if (can_access_xattr (it))
+      if (can_access_xattr (l, it))
         {
           it += it_len;
           ret += it_len;
         }
       else
         {
-          char *next = it + it_len;
+          char *next = it;
+
+          next += encoded_xattr_name (l, it) ?
+                  sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1 : it_len;
 
           memmove (it, next, buf + len - next);
           len -= it_len;
@@ -2665,7 +2706,7 @@ ovl_listxattr (fuse_req_t req, fuse_ino_t ino, size_t size)
       return;
     }
 
-  len = filter_xattrs_list (buf, ret);
+  len = filter_xattrs_list (node->layer, buf, ret);
 
   if (size == 0)
     fuse_reply_xattr (req, len);
@@ -2680,7 +2721,8 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   ssize_t len;
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
-  cleanup_free char *buf = NULL;
+  cleanup_free char *value_buf = NULL;
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -2692,12 +2734,6 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
-  if (! can_access_xattr (name))
-    {
-      fuse_reply_err (req, ENODATA);
-      return;
-    }
-
   node = do_lookup_file (lo, ino, NULL);
   if (node == NULL || node->whiteout)
     {
@@ -2705,10 +2741,17 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
       return;
     }
 
+  name = encode_xattr_name (node->layer, name_buf, name);
+  if (!name)
+    {
+      fuse_reply_err (req, ENODATA);
+      return;
+    }
+
   if (size > 0)
     {
-      buf = malloc (size);
-      if (buf == NULL)
+      value_buf = malloc (size);
+      if (value_buf == NULL)
         {
           fuse_reply_err (req, errno);
           return;
@@ -2716,12 +2759,12 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
     }
 
   if (! node->hidden)
-    ret = node->layer->ds->getxattr (node->layer, node->path, name, buf, size);
+    ret = node->layer->ds->getxattr (node->layer, node->path, name, value_buf, size);
   else
     {
       char path[PATH_MAX];
       strconcat3 (path, PATH_MAX, lo->workdir, "/", node->path);
-      ret = getxattr (path, name, buf, size);
+      ret = getxattr (path, name, value_buf, size);
     }
 
   if (ret < 0)
@@ -2735,7 +2778,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
   if (size == 0)
     fuse_reply_xattr (req, len);
   else
-    fuse_reply_buf (req, buf, len);
+    fuse_reply_buf (req, value_buf, len);
 }
 
 static void
@@ -2756,7 +2799,8 @@ ovl_access (fuse_req_t req, fuse_ino_t ino, int mask)
 }
 
 static int
-copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
+copy_xattr (const struct ovl_layer *sl, int sfd,
+            const struct ovl_layer *dl, int dfd, char *buf, size_t buf_size)
 {
   ssize_t xattr_len;
 
@@ -2767,9 +2811,16 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
       for (it = buf; it - buf < xattr_len; it += strlen (it) + 1)
         {
           cleanup_free char *v = NULL;
+          const char *decoded_name = decode_xattr_name (sl, it);
+          const char *encoded_name;
+          char buf[XATTR_NAME_MAX + 1];
           ssize_t s;
 
-          if (! can_access_xattr (it))
+          if (! decoded_name)
+            continue;
+
+          encoded_name = encode_xattr_name (dl, buf, decoded_name);
+          if (! encoded_name)
             continue;
 
           s = safe_read_xattr (&v, sfd, it, 256);
@@ -2780,7 +2831,7 @@ copy_xattr (int sfd, int dfd, char *buf, size_t buf_size)
               return -1;
             }
 
-          if (fsetxattr (dfd, it, v, s, 0) < 0)
+          if (fsetxattr (dfd, encoded_name, v, s, 0) < 0)
             {
               if (errno == EINVAL || errno == EOPNOTSUPP)
                 continue;
@@ -2856,7 +2907,8 @@ static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 
 static int
 create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
-                  struct ovl_node *parent, int xattr_sfd, uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
+                  struct ovl_node *parent, struct ovl_layer *sl, int xattr_sfd,
+                  uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
 {
   int ret;
   int saved_errno;
@@ -2920,7 +2972,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
           goto out;
         }
 
-      ret = copy_xattr (xattr_sfd, dfd, buf, buf_size);
+      ret = copy_xattr (sl, xattr_sfd, get_upper_layer (lo), dfd, buf, buf_size);
       if (ret < 0)
         goto out;
     }
@@ -3013,7 +3065,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   if (override_mode (src->layer, sfd, NULL, NULL, &st) < 0 && errno != ENODATA && errno != EOPNOTSUPP)
     return -1;
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, src->layer, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
   if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
@@ -3192,7 +3244,7 @@ copyup (struct ovl_data *lo, struct ovl_node *node)
   if (ret < 0)
     goto exit;
 
-  ret = copy_xattr (sfd, dfd, buf, buf_size);
+  ret = copy_xattr (node->layer, sfd, get_upper_layer (lo), dfd, buf, buf_size);
   if (ret < 0)
     goto exit;
 
@@ -3472,6 +3524,7 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   cleanup_lock int l = enter_big_lock ();
   struct ovl_data *lo = ovl_data (req);
   struct ovl_node *node;
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -3481,12 +3534,6 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
   if (lo->disable_xattrs)
     {
       fuse_reply_err (req, ENOSYS);
-      return;
-    }
-
-  if (has_prefix (name, PRIVILEGED_XATTR_PREFIX) || has_prefix (name, XATTR_PREFIX) || has_prefix (name, XATTR_CONTAINERS_PREFIX))
-    {
-      fuse_reply_err (req, EPERM);
       return;
     }
 
@@ -3503,6 +3550,13 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       fuse_reply_err (req, errno);
       return;
     }
+
+    name = encode_xattr_name (node->layer, name_buf, name);
+    if (!name)
+      {
+        fuse_reply_err (req, EPERM);
+        return;
+      }
 
   if (! node->hidden)
     ret = direct_setxattr (node->layer, node->path, name, value, size, flags);
@@ -3545,6 +3599,7 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
   cleanup_lock int l = enter_big_lock ();
   struct ovl_node *node;
   struct ovl_data *lo = ovl_data (req);
+  char name_buf[XATTR_NAME_MAX + 1];
   int ret;
 
   if (UNLIKELY (ovl_debug (req)))
@@ -3563,6 +3618,13 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       fuse_reply_err (req, errno);
       return;
     }
+
+    name = encode_xattr_name (node->layer, name_buf, name);
+    if (!name)
+      {
+        fuse_reply_err (req, EPERM);
+        return;
+      }
 
   if (! node->hidden)
     ret = direct_removexattr (node->layer, node->path, name);
@@ -3823,7 +3885,7 @@ ovl_write_buf (fuse_req_t req, fuse_ino_t ino,
   /* if it is a writepage request, make sure to restore the setuid bit.  */
   if (fi->writepage && (inode->mode & (S_ISUID | S_ISGID)))
     {
-      if (do_fchmod (lo, fi->fh, inode->mode) < 0)
+      if (do_fchmod (lo, inode->node, fi->fh, inode->mode) < 0)
         {
           fuse_reply_err (req, errno);
           return;
@@ -4135,9 +4197,9 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
   if (to_set & FUSE_SET_ATTR_MODE)
     {
       if (fd >= 0)
-        ret = do_fchmod (lo, fd, attr->st_mode);
+        ret = do_fchmod (lo, node, fd, attr->st_mode);
       else
-        ret = do_chmod (lo, path, attr->st_mode);
+        ret = do_chmod (lo, node, path, attr->st_mode);
       if (ret < 0)
         {
           fuse_reply_err (req, errno);
@@ -4161,6 +4223,24 @@ ovl_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, stru
 
   if (uid != -1 || gid != -1)
     {
+      struct stat st;
+
+      if (do_stat (node, fd, NULL, &st) < 0)
+        {
+          fuse_reply_err (req, errno);
+          return;
+        }
+
+      if (uid == -1)
+        {
+          uid = st.st_uid;
+        }
+
+      if (gid == -1)
+        {
+          gid = st.st_gid;
+        }
+
       if (fd >= 0)
         ret = do_fchown (lo, fd, uid, gid, node->ino->mode);
       else
@@ -5089,7 +5169,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, -1,
+  ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, NULL, -1,
                           get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask,
                           true, &st);
   if (ret < 0)
@@ -5777,13 +5857,22 @@ main (int argc, char *argv[])
             }
           else if (lo.xattr_permissions == 2)
             {
-              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_USER;
-              name = XATTR_OVERRIDE_STAT;
+              get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_CONTAINERS;
+              name = XATTR_OVERRIDE_CONTAINERS_STAT;
             }
           else
             error (EXIT_FAILURE, 0, "invalid value for xattr_permissions");
 
           s = fgetxattr (get_upper_layer (&lo)->fd, name, data, sizeof (data));
+          if (s < 0 && errno == ENODATA && lo.xattr_permissions == 2)
+            {
+              s = fgetxattr (get_upper_layer (&lo)->fd, XATTR_OVERRIDE_STAT, data, sizeof (data));
+              if (s >= 0)
+                {
+                  get_upper_layer (&lo)->stat_override_mode = STAT_OVERRIDE_USER;
+                  name = XATTR_OVERRIDE_STAT;
+                }
+            }
           if (s < 0)
             {
               bool found = false;
@@ -5794,15 +5883,19 @@ main (int argc, char *argv[])
 
               for (l = get_lower_layers (&lo); l; l = l->next)
                 {
-                  s = fgetxattr (l->fd, name, data, sizeof (data));
-                  if (s < 0 && errno != ENODATA)
-                    error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
-                  if (s < 0 && lo.xattr_permissions == 2)
+                  switch (lo.xattr_permissions)
                     {
+                    case 1:
+                      s = fgetxattr (l->fd, name, data, sizeof (data));
+                      break;
+
+                    case 2:
                       s = fgetxattr (l->fd, XATTR_OVERRIDE_CONTAINERS_STAT, data, sizeof (data));
-                      if (s < 0 && errno != ENODATA)
-                        error (EXIT_FAILURE, errno, "fgetxattr mode from lower layer");
+                      if (s < 0 && errno == ENODATA)
+                        s = fgetxattr (l->fd, XATTR_OVERRIDE_STAT, data, sizeof (data));
+                      break;
                     }
+
                   if (s > 0)
                     {
                       ret = fsetxattr (get_upper_layer (&lo)->fd, name, data, s, 0);

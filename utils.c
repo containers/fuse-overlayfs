@@ -270,14 +270,10 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
   if (fd >= 0)
     {
       ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
-      if (ret < 0)
-        return ret;
     }
   else if (abs_path)
     {
       ret = lgetxattr (abs_path, xattr_name, buf, sizeof (buf) - 1);
-      if (ret < 0)
-        return ret;
     }
   else
     {
@@ -292,15 +288,11 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
       if (fd >= 0)
         ret = fgetxattr (fd, xattr_name, buf, sizeof (buf) - 1);
       else
-        {
-          ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
-          if (ret < 0 && errno == ENODATA)
-            return 0;
-        }
-
-      if (ret < 0)
-        return ret;
+        ret = lgetxattr (full_path, xattr_name, buf, sizeof (buf) - 1);
     }
+
+  if (ret < 0)
+    return errno == ENODATA ? 0 : ret;
 
   buf[ret] = '\0';
 

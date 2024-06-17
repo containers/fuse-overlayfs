@@ -6,12 +6,12 @@ import stat
 import errno
 
 XATTR_OVERRIDE_STAT_PRIVILEGED = "security.fuseoverlayfs.override_stat"
-XATTR_OVERRIDE_STAT = "user.fuseoverlayfs.override_stat"
+XATTR_OVERRIDE_CONTAINERS_STAT = "user.fuseoverlayfs.override_stat"
 
 if os.geteuid() == 0:
     xattr_name = XATTR_OVERRIDE_STAT_PRIVILEGED
 else:
-    xattr_name = XATTR_OVERRIDE_STAT
+    xattr_name = XATTR_OVERRIDE_CONTAINERS_STAT
 
 cwd_fd = os.open(".", os.O_PATH)
 
@@ -23,7 +23,7 @@ def fix_path(path):
         os.setxattr(path, xattr_name, str.encode(content), flags=os.XATTR_CREATE, follow_symlinks=False)
     except Exception as e:
         if e.errno == errno.EEXIST:
-            print("attr %s already present for %s: %s" % (XATTR_OVERRIDE_STAT, path, e.errno))
+            print("attr %s already present for %s: %s" % (xattr_name, path, e.errno))
             return
         raise e
 
