@@ -3,7 +3,7 @@ WORKDIR /build
 RUN dnf update -y && \
     dnf install -y git make automake autoconf gcc glibc-static meson ninja-build clang
 
-RUN git clone https://github.com/libfuse/libfuse && \
+RUN git clone https://github.com/libfuse/libfuse -b fuse-3.16.2 && \
     cd libfuse && \
     mkdir build && \
     cd build && \
