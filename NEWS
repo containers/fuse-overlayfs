@@ -1,3 +1,15 @@
+* fuse-overlayfs-1.14
+
+- isolate security xattrs for STAT_OVERRIDE_CONTAINERS.  Prefix all
+  security xattrs with XATTR_CONTAINERS_OVERRIDE_PREFIX.
+- prefer user.containers.override_stat over user.fuseoverlayfs.
+- do not force -1 for owner overriding extended attributes.  Otherwise
+  the value is written to the override extended attribute.
+- fix file owner retrieval for chmod.
+- honor umask with xattr_permissions.
+- honor mode for devices with xattr_permissions.
+- propagate extended attributes permissions with copyup.
+
 * fuse-overlayfs-1.13
 
 - fix a performance issue when dealing with big directories.
