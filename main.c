@@ -5640,7 +5640,7 @@ get_new_args (int *argc, char **argv)
 
   newargv[0] = argv[0];
   if (geteuid () == 0)
-    newargv[1] = "-odefault_permissions,allow_other,suid,noatime,lazytime";
+    newargv[1] = "-odefault_permissions,allow_other,suid,noatime";
   else
     newargv[1] = "-odefault_permissions,noatime";
   for (i = 1; i < *argc; i++)
