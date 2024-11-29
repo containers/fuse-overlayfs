@@ -225,15 +225,37 @@ open_fd_or_get_path (struct ovl_layer *l, const char *path, char *out, int *fd, 
 }
 
 int
+read_device (const char *s, dev_t *dev)
+{
+  unsigned int major, minor;
+  int ret;
+
+  while (*s == '-')
+    s++;
+
+  ret = sscanf (s, "%u-%u", &major, &minor);
+  if (ret != 2)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
+  *dev = makedev (major, minor);
+
+  return 0;
+}
+
+int
 override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st)
 {
   int ret;
   uid_t uid;
   gid_t gid;
-  mode_t mode;
+  mode_t mode = 0;
   char buf[64];
   cleanup_close int cleanup_fd = -1;
   const char *xattr_name;
+  cleanup_free char *type = NULL;
 
   switch (st->st_mode & S_IFMT)
     {
@@ -296,8 +318,45 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
 
   buf[ret] = '\0';
 
-  ret = sscanf (buf, "%d:%d:%o", &uid, &gid, &mode);
-  if (ret != 3)
+  ret = sscanf (buf, "%d:%d:%o:%ms", &uid, &gid, &mode, &type);
+  if (ret == 4)
+    {
+      if (has_prefix (type, "dir"))
+        mode |= S_IFDIR;
+      else if (has_prefix (type, "file"))
+        mode |= S_IFREG;
+      else if (has_prefix (type, "symlink"))
+        mode |= S_IFLNK;
+      else if (has_prefix (type, "pipe"))
+        mode |= S_IFIFO;
+      else if (has_prefix (type, "socket"))
+        mode |= S_IFSOCK;
+      else if (has_prefix (type, "block"))
+        {
+          mode |= S_IFBLK;
+          ret = read_device (type + strlen ("block"), &st->st_rdev);
+          if (ret < 0)
+            return ret;
+        }
+      else if (has_prefix (type, "char"))
+        {
+          mode |= S_IFCHR;
+          ret = read_device (type + strlen ("char"), &st->st_rdev);
+          if (ret < 0)
+            return ret;
+        }
+      else
+        {
+          errno = EINVAL;
+          return -1;
+        }
+    }
+  else if (ret == 3)
+    {
+      /* If a type is not specified, keep the original one.  */
+      mode |= (st->st_mode & S_IFMT);
+    }
+  else
     {
       errno = EINVAL;
       return -1;
@@ -305,7 +364,24 @@ override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *pa
 
   st->st_uid = uid;
   st->st_gid = gid;
-  st->st_mode = (st->st_mode & S_IFMT) | mode;
+  st->st_mode = mode;
 
   return 0;
+}
+
+bool
+has_prefix (const char *str, const char *pref)
+{
+  while (1)
+    {
+      if (*pref == '\0')
+        return true;
+      if (*str == '\0')
+        return false;
+      if (*pref != *str)
+        return false;
+      str++;
+      pref++;
+    }
+  return false;
 }
