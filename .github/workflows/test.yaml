@@ -4,20 +4,20 @@ on: [push, pull_request]
 
 jobs:
   build_job:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     name: Build on ${{ matrix.arch }}
 
     strategy:
       matrix:
         include:
           - arch: armv7
-            distro: ubuntu22.04
+            distro: ubuntu_latest
           - arch: aarch64
-            distro: ubuntu22.04
+            distro: ubuntu_latest
           - arch: s390x
-            distro: ubuntu22.04
+            distro: ubuntu_latest
           - arch: ppc64le
-            distro: ubuntu22.04
+            distro: ubuntu_latest
     steps:
       - uses: actions/checkout@v2.1.0
       - uses: uraimo/run-on-arch-action@v2.7.2
@@ -49,7 +49,7 @@ jobs:
             fuse-overlayfs
 
   Test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -90,7 +90,7 @@ jobs:
     - name: Archive build artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: fuse-overlayfs-x86_64-ubuntu22.04
+        name: fuse-overlayfs-x86_64-ubuntu-latest
         path: |
           fuse-overlayfs
       if: ${{ matrix.test == 'ovl-whiteouts' }}
