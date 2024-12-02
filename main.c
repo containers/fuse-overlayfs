@@ -509,42 +509,25 @@ node_dirfd (struct ovl_node *n)
 }
 
 static bool
-has_prefix (const char *str, const char *pref)
-{
-  while (1)
-    {
-      if (*pref == '\0')
-        return true;
-      if (*str == '\0')
-        return false;
-      if (*pref != *str)
-        return false;
-      str++;
-      pref++;
-    }
-  return false;
-}
-
-static bool
 can_access_xattr (const struct ovl_layer *l, const char *name)
 {
   return ! (has_prefix (name, XATTR_PREFIX)
             || has_prefix (name, PRIVILEGED_XATTR_PREFIX)
             || has_prefix (name, UNPRIVILEGED_XATTR_PREFIX)
-            || (l->stat_override_mode == STAT_OVERRIDE_CONTAINERS &&
-                has_prefix (name, XATTR_SECURITY_PREFIX)));
+            || (l->stat_override_mode == STAT_OVERRIDE_CONTAINERS && has_prefix (name, XATTR_SECURITY_PREFIX)));
 }
 
-static bool encoded_xattr_name (const struct ovl_layer *l, const char *name)
+static bool
+encoded_xattr_name (const struct ovl_layer *l, const char *name)
 {
-  return has_prefix (name, XATTR_CONTAINERS_OVERRIDE_PREFIX) &&
-         ! can_access_xattr (l, name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
+  return has_prefix (name, XATTR_CONTAINERS_OVERRIDE_PREFIX) && ! can_access_xattr (l, name + sizeof (XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1);
 }
 
-static const char *decode_xattr_name (const struct ovl_layer *l, const char *name)
+static const char *
+decode_xattr_name (const struct ovl_layer *l, const char *name)
 {
   if (encoded_xattr_name (l, name))
-    return name + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1;
+    return name + sizeof (XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1;
 
   if (can_access_xattr (l, name))
     return name;
@@ -552,18 +535,18 @@ static const char *decode_xattr_name (const struct ovl_layer *l, const char *nam
   return NULL;
 }
 
-static const char *encode_xattr_name (const struct ovl_layer *l, char *buf,
-                                      const char *name)
+static const char *
+encode_xattr_name (const struct ovl_layer *l, char *buf,
+                   const char *name)
 {
   if (can_access_xattr (l, name))
     return name;
 
-  if (l->stat_override_mode != STAT_OVERRIDE_CONTAINERS ||
-      strlen(name) > XATTR_NAME_MAX + 1 - sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX))
+  if (l->stat_override_mode != STAT_OVERRIDE_CONTAINERS || strlen (name) > XATTR_NAME_MAX + 1 - sizeof (XATTR_CONTAINERS_OVERRIDE_PREFIX))
     return NULL;
 
-  strcpy(buf, XATTR_CONTAINERS_OVERRIDE_PREFIX);
-  strcpy(buf + sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1, name);
+  strcpy (buf, XATTR_CONTAINERS_OVERRIDE_PREFIX);
+  strcpy (buf + sizeof (XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1, name);
 
   return buf;
 }
@@ -2645,8 +2628,7 @@ filter_xattrs_list (struct ovl_layer *l, char *buf, ssize_t len)
         {
           char *next = it;
 
-          next += encoded_xattr_name (l, it) ?
-                  sizeof(XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1 : it_len;
+          next += encoded_xattr_name (l, it) ? sizeof (XATTR_CONTAINERS_OVERRIDE_PREFIX) - 1 : it_len;
 
           memmove (it, next, buf + len - next);
           len -= it_len;
@@ -2742,7 +2724,7 @@ ovl_getxattr (fuse_req_t req, fuse_ino_t ino, const char *name, size_t size)
     }
 
   name = encode_xattr_name (node->layer, name_buf, name);
-  if (!name)
+  if (! name)
     {
       fuse_reply_err (req, ENODATA);
       return;
@@ -3551,12 +3533,12 @@ ovl_setxattr (fuse_req_t req, fuse_ino_t ino, const char *name,
       return;
     }
 
-    name = encode_xattr_name (node->layer, name_buf, name);
-    if (!name)
-      {
-        fuse_reply_err (req, EPERM);
-        return;
-      }
+  name = encode_xattr_name (node->layer, name_buf, name);
+  if (! name)
+    {
+      fuse_reply_err (req, EPERM);
+      return;
+    }
 
   if (! node->hidden)
     ret = direct_setxattr (node->layer, node->path, name, value, size, flags);
@@ -3619,12 +3601,12 @@ ovl_removexattr (fuse_req_t req, fuse_ino_t ino, const char *name)
       return;
     }
 
-    name = encode_xattr_name (node->layer, name_buf, name);
-    if (!name)
-      {
-        fuse_reply_err (req, EPERM);
-        return;
-      }
+  name = encode_xattr_name (node->layer, name_buf, name);
+  if (! name)
+    {
+      fuse_reply_err (req, EPERM);
+      return;
+    }
 
   if (! node->hidden)
     ret = direct_removexattr (node->layer, node->path, name);

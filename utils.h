@@ -62,4 +62,6 @@ int safe_openat (int dirfd, const char *pathname, int flags, mode_t mode);
 
 int override_mode (struct ovl_layer *l, int fd, const char *abs_path, const char *path, struct stat *st);
 
+bool has_prefix (const char *str, const char *pref);
+
 #endif
