@@ -5878,7 +5878,7 @@ main (int argc, char *argv[])
               if (! found)
                 {
                   /* If the mode is missing, set a standard value.  */
-                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd, lo.upperdir, 0, 0, 0555);
+                  ret = write_permission_xattr (&lo, get_upper_layer (&lo)->fd, get_upper_layer (&lo)->path, 0, 0, 0555);
                   if (ret < 0)
                     error (EXIT_FAILURE, errno, "write xattr `%s` to upperdir", name);
                 }
