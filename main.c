@@ -5755,18 +5755,6 @@ main (int argc, char *argv[])
   if (lo.mountpoint == NULL)
     error (EXIT_FAILURE, 0, "no mountpoint specified");
 
-  if (lo.upperdir != NULL)
-    {
-      cleanup_free char *full_path = NULL;
-
-      full_path = realpath (lo.upperdir, NULL);
-      if (full_path == NULL)
-        error (EXIT_FAILURE, errno, "cannot retrieve path for %s", lo.upperdir);
-
-      lo.upperdir = strdup (full_path);
-      if (lo.upperdir == NULL)
-        error (EXIT_FAILURE, errno, "cannot allocate memory");
-    }
 
   set_limits ();
   check_can_mknod (&lo);
