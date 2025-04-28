@@ -19,7 +19,7 @@ jobs:
           - arch: ppc64le
             distro: ubuntu_latest
     steps:
-      - uses: actions/checkout@v2.1.0
+      - uses: actions/checkout@v4
       - uses: uraimo/run-on-arch-action@v3.0.1
         name: Build
         id: build
@@ -61,7 +61,7 @@ jobs:
       TAGS: exclude_graphdriver_devicemapper exclude_graphdriver_btrfs no_libsubid
     steps:
     - name: checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: install dependencies
       run: |
