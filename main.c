@@ -1924,6 +1924,58 @@ cleanup_layerp (struct ovl_layer **p)
 
 #define cleanup_layer __attribute__ ((cleanup (cleanup_layerp)))
 
+static void
+unescape (char *input)
+{
+  char *dest = input;
+
+  if (input == NULL)
+    return;
+
+  for (; *input; input++)
+    {
+      if (*input == '\\')
+        continue;
+
+      *dest++ = *input;
+    }
+  *dest = '\0';
+}
+
+static char *
+get_next_path (char *it, char **saveptr)
+{
+  char *ret;
+
+  if (*saveptr == NULL)
+    *saveptr = it;
+
+  ret = *saveptr;
+
+  if (*ret == '\0')
+    return NULL;
+
+  while (1)
+    {
+      if (**saveptr == '\0')
+        break;
+
+      if (**saveptr == ':')
+        {
+          **saveptr = '\0';
+          (*saveptr)++;
+          break;
+        }
+      else if (**saveptr == '\\')
+        {
+          memmove (*saveptr, *saveptr + 1, strlen (*saveptr) + 1);
+        }
+
+      (*saveptr)++;
+    }
+  return ret;
+}
+
 static struct ovl_layer *
 read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
 {
@@ -1942,7 +1994,7 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
   while (last && last->next)
     last = last->next;
 
-  for (it = strtok_r (buf, ":", &saveptr); it; it = strtok_r (NULL, ":", &saveptr))
+  for (it = get_next_path (buf, &saveptr); it; it = get_next_path (NULL, &saveptr))
     {
       char *name, *data;
       char *it_path = it;
@@ -5755,6 +5807,7 @@ main (int argc, char *argv[])
   if (lo.mountpoint == NULL)
     error (EXIT_FAILURE, 0, "no mountpoint specified");
 
+  unescape (lo.workdir);
 
   set_limits ();
   check_can_mknod (&lo);

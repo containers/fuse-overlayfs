@@ -2,17 +2,17 @@
 
 set -xeuo pipefail
 
-mkdir lower upper workdir merged
+mkdir lower:1 upper:2 workdir:3 merged
 
-fuse-overlayfs -o sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
+fuse-overlayfs -o 'sync=0,lowerdir=lower\\:1,upperdir=upper\\:2,workdir=workdir\\:3,suid,dev' merged
 
 docker run --rm -v $(pwd)/merged:/merged fedora dnf --use-host-config --installroot /merged --releasever 41 install -y glibc-common gedit
 
 umount merged
 
 # Make sure workdir is empty, and move the upper layer down
-rm -rf workdir lower
-mv upper lower
+rm -rf lower:1 workdir:3
+mv upper:2 lower
 mkdir upper workdir
 
 gcc -static -o suid-test $(dirname $0)/suid-test.c
