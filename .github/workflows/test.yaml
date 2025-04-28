@@ -42,7 +42,7 @@ jobs:
             make -j $(nproc)
 
       - name: Archive build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: fuse-overlayfs-${{ matrix.arch }}-${{ matrix.distro }}
           path: |
@@ -88,7 +88,7 @@ jobs:
         sudo cp fuse-overlayfs /sbin
 
     - name: Archive build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4.6.2
       with:
         name: fuse-overlayfs-x86_64-ubuntu-latest
         path: |
