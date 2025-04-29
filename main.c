@@ -1018,7 +1018,7 @@ node_free (void *p)
   if (n->parent)
     {
       if (n->parent->children && hash_lookup (n->parent->children, n) == n)
-        hash_delete (n->parent->children, n);
+        hash_remove (n->parent->children, n);
       n->parent->loaded = 0;
       n->parent = NULL;
     }
@@ -1078,7 +1078,7 @@ drop_node_from_ino (Hash_table *inodes, struct ovl_node *node)
 
   if (ino->lookups == 0)
     {
-      hash_delete (inodes, ino);
+      hash_remove (inodes, ino);
       inode_free (ino);
       return;
     }
@@ -1308,7 +1308,7 @@ do_forget (struct ovl_data *lo, fuse_ino_t ino, uint64_t nlookup)
   i->lookups -= nlookup;
   if (i->lookups <= 0)
     {
-      hash_delete (lo->inodes, i);
+      hash_remove (lo->inodes, i);
       inode_free (i);
     }
   return true;
@@ -1659,12 +1659,12 @@ insert_node (struct ovl_node *parent, struct ovl_node *item, bool replace)
   if (prev_parent)
     {
       if (hash_lookup (prev_parent->children, item) == item)
-        hash_delete (prev_parent->children, item);
+        hash_remove (prev_parent->children, item);
     }
 
   if (replace)
     {
-      old = hash_delete (parent->children, item);
+      old = hash_remove (parent->children, item);
       if (old)
         node_free (old);
     }
@@ -1787,7 +1787,7 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
                 continue;
               else
                 {
-                  hash_delete (n->children, child);
+                  hash_remove (n->children, child);
                   node_free (child);
                   child = NULL;
                 }
@@ -3496,7 +3496,7 @@ do_rm (fuse_req_t req, fuse_ino_t parent, const char *name, bool dirp)
 
   node_set_name (&key, (char *) name);
 
-  rm = hash_delete (pnode->children, &key);
+  rm = hash_remove (pnode->children, &key);
   fuse_lowlevel_notify_inval_inode (lo->se, node_to_inode (node), -1, 0);
   if (rm)
     {
@@ -4623,8 +4623,8 @@ ovl_rename_exchange (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (ret < 0)
     goto error;
 
-  rm1 = hash_delete (destpnode->children, destnode);
-  rm2 = hash_delete (pnode->children, node);
+  rm1 = hash_remove (destpnode->children, destnode);
+  rm2 = hash_remove (pnode->children, node);
 
   tmp = node->path;
   node->path = destnode->path;
@@ -4854,7 +4854,7 @@ ovl_rename_direct (fuse_req_t req, fuse_ino_t parent, const char *name,
   if (delete_whiteout (lo, destfd, NULL, newname) < 0)
     goto error;
 
-  hash_delete (pnode->children, node);
+  hash_remove (pnode->children, node);
 
   free (node->name);
   node_set_name (node, strdup (newname));
