@@ -19,8 +19,8 @@ jobs:
           - arch: ppc64le
             distro: ubuntu_latest
     steps:
-      - uses: actions/checkout@v2.1.0
-      - uses: uraimo/run-on-arch-action@v2.8.1
+      - uses: actions/checkout@v4
+      - uses: uraimo/run-on-arch-action@v3.0.1
         name: Build
         id: build
         with:
@@ -42,7 +42,7 @@ jobs:
             make -j $(nproc)
 
       - name: Archive build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: fuse-overlayfs-${{ matrix.arch }}-${{ matrix.distro }}
           path: |
@@ -61,7 +61,7 @@ jobs:
       TAGS: exclude_graphdriver_devicemapper exclude_graphdriver_btrfs no_libsubid
     steps:
     - name: checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: install dependencies
       run: |
@@ -88,7 +88,7 @@ jobs:
         sudo cp fuse-overlayfs /sbin
 
     - name: Archive build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4.6.2
       with:
         name: fuse-overlayfs-x86_64-ubuntu-latest
         path: |
@@ -97,6 +97,9 @@ jobs:
 
     - name: run test
       run: |
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+
         case "${{ matrix.test }}" in
             ovl-whiteouts)
                 sudo sh -c "(cd /unionmount-testsuite; unshare -m ./run --ov --fuse=fuse-overlayfs --xdev)"
