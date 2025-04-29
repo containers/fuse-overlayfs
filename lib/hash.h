@@ -1,5 +1,5 @@
 /* hash - hashing table processing.
-   Copyright (C) 1998-1999, 2001, 2003, 2009-2023 Free Software Foundation,
+   Copyright (C) 1998-1999, 2001, 2003, 2009-2025 Free Software Foundation,
    Inc.
    Written by Jim Meyering <meyering@ascend.com>, 1998.
 
@@ -61,24 +61,24 @@ typedef struct hash_table Hash_table;
    number of buckets (used plus unused), or the maximum number of slots, are
    the same quantity.  */
 extern size_t hash_get_n_buckets (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 /* Return the number of slots in use (non-empty buckets).  */
 extern size_t hash_get_n_buckets_used (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 /* Return the number of active entries.  */
 extern size_t hash_get_n_entries (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 /* Return the length of the longest chain (bucket).  */
 extern size_t hash_get_max_bucket_length (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 /* Do a mild validation of a hash table, by traversing it and checking two
    statistics.  */
 extern bool hash_table_ok (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 extern void hash_print_statistics (const Hash_table *table, FILE *stream);
 
@@ -99,7 +99,7 @@ extern void *hash_lookup (const Hash_table *table, const void *entry);
 
 /* Return the first data in the table, or NULL if the table is empty.  */
 extern void *hash_get_first (const Hash_table *table)
-       ;
+       _GL_ATTRIBUTE_PURE;
 
 /* Return the user data for the entry following ENTRY, where ENTRY has been
    returned by a previous call to either 'hash_get_first' or 'hash_get_next'.
@@ -124,25 +124,40 @@ typedef bool (*Hash_processor) (void *entry, void *processor_data);
 extern size_t hash_do_for_each (const Hash_table *table,
                                 Hash_processor processor, void *processor_data);
 
+/* Return a hash index for a NUL-terminated STRING between 0 and N_BUCKETS-1.
+   This is a convenience routine for constructing other hashing functions.  */
+extern size_t hash_string (const char *string, size_t n_buckets)
+       _GL_ATTRIBUTE_PURE;
+
+/* Return a hash code of ENTRY, in the range 0..TABLE_SIZE-1.
+   This hash code function must have the property that if the comparator of
+   ENTRY1 and ENTRY2 returns true, the hasher returns the same value for ENTRY1
+   and for ENTRY2.
+   The hash code function typically computes an unsigned integer and at the end
+   performs a % TABLE_SIZE modulo operation.  This modulo operation is performed
+   as part of this hash code function, not by the caller, because in some cases
+   the unsigned integer will be a 'size_t', in other cases an 'uintmax_t' or
+   even larger.  */
+typedef size_t (*Hash_hasher) (const void *entry, size_t table_size);
+
+/* Compare two entries, ENTRY1 (being looked up or being inserted) and
+   ENTRY2 (already in the table) for equality.  Return true for equal,
+   false otherwise.  */
+typedef bool (*Hash_comparator) (const void *entry1, const void *entry2);
+
+/* This function is invoked when an ENTRY is removed from the hash table.  */
+typedef void (*Hash_data_freer) (void *entry);
+
 /*
  * Allocation and clean-up.
  */
 
-/* Return a hash index for a NUL-terminated STRING between 0 and N_BUCKETS-1.
-   This is a convenience routine for constructing other hashing functions.  */
-extern size_t hash_string (const char *string, size_t n_buckets)
-       ;
-
 extern void hash_reset_tuning (Hash_tuning *tuning);
-
-typedef size_t (*Hash_hasher) (const void *entry, size_t table_size);
-typedef bool (*Hash_comparator) (const void *entry1, const void *entry2);
-typedef void (*Hash_data_freer) (void *entry);
 
 /* Reclaim all storage associated with a hash table.  If a data_freer
    function has been supplied by the user when the hash table was created,
    this function applies it to the data of each entry before freeing that
-   entry.  */
+   entry.  This function preserves errno, like 'free'.  */
 extern void hash_free (Hash_table *table);
 
 /* Allocate and return a new hash table, or NULL upon failure.  The initial
@@ -177,23 +192,30 @@ extern void hash_free (Hash_table *table);
    You should specify this function only if you want these functions to free
    all of your 'data' data.  This is typically the case when your data is
    simply an auxiliary struct that you have malloc'd to aggregate several
-   values.  */
+   values.
+
+   Set errno on failure; otherwise errno is unspecified.  */
+_GL_ATTRIBUTE_NODISCARD
 extern Hash_table *hash_initialize (size_t candidate,
                                     const Hash_tuning *tuning,
                                     Hash_hasher hasher,
                                     Hash_comparator comparator,
-                                    Hash_data_freer data_freer);
+                                    Hash_data_freer data_freer)
+  _GL_ATTRIBUTE_MALLOC _GL_ATTRIBUTE_DEALLOC (hash_free, 1);
 
-/* Same as hash_initialize, but invokes xalloc_die on memory exhaustion.  */
+/* Like hash_initialize, but invokes xalloc_die instead of returning NULL.  */
 /* This function is defined by module 'xhash'.  */
+_GL_ATTRIBUTE_NODISCARD
 extern Hash_table *hash_xinitialize (size_t candidate,
                                      const Hash_tuning *tuning,
                                      Hash_hasher hasher,
                                      Hash_comparator comparator,
-                                     Hash_data_freer data_freer);
+                                     Hash_data_freer data_freer)
+  _GL_ATTRIBUTE_MALLOC _GL_ATTRIBUTE_DEALLOC (hash_free, 1)
+  _GL_ATTRIBUTE_RETURNS_NONNULL;
 
 /* Make all buckets empty, placing any chained entries on the free list.
-   Apply the user-specified function data_freer (if any) to the datas of any
+   Apply the user-specified function data_freer (if any) to the data of any
    affected entries.  */
 extern void hash_clear (Hash_table *table);
 
@@ -207,23 +229,26 @@ extern void hash_clear (Hash_table *table);
    the table may receive at least CANDIDATE different user entries, including
    those already in the table, before any other growth of the hash table size
    occurs.  If TUNING->IS_N_BUCKETS is true, then CANDIDATE specifies the
-   exact number of buckets desired.  Return true iff the rehash succeeded.  */
+   exact number of buckets desired.  Return true iff the rehash succeeded,
+   false (setting errno) otherwise.  */
+_GL_ATTRIBUTE_NODISCARD
 extern bool hash_rehash (Hash_table *table, size_t candidate);
 
 /* If ENTRY matches an entry already in the hash table, return the pointer
    to the entry from the table.  Otherwise, insert ENTRY and return ENTRY.
-   Return NULL if the storage required for insertion cannot be allocated.
-   This implementation does not support duplicate entries or insertion of
-   NULL.  */
+   Return NULL (setting errno) if the storage required for insertion
+   cannot be allocated.  This implementation does not support
+   duplicate entries or insertion of NULL.  */
+_GL_ATTRIBUTE_NODISCARD
 extern void *hash_insert (Hash_table *table, const void *entry);
 
-/* Same as hash_insert, but invokes xalloc_die on memory exhaustion.  */
+/* Same as hash_insert, but invokes xalloc_die instead of returning NULL.  */
 /* This function is defined by module 'xhash'.  */
 extern void *hash_xinsert (Hash_table *table, const void *entry);
 
 /* Insert ENTRY into hash TABLE if there is not already a matching entry.
 
-   Return -1 upon memory allocation failure.
+   Return -1 (setting errno) upon memory allocation failure.
    Return 1 if insertion succeeded.
    Return 0 if there is already a matching entry in the table,
    and in that case, if MATCHED_ENT is non-NULL, set *MATCHED_ENT
@@ -247,6 +272,7 @@ extern void *hash_remove (Hash_table *table, const void *entry);
 
 /* Same as hash_remove.  This interface is deprecated.
    FIXME: Remove in 2022.  */
+_GL_ATTRIBUTE_DEPRECATED
 extern void *hash_delete (Hash_table *table, const void *entry);
 
 # ifdef __cplusplus
