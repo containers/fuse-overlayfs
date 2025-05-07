@@ -1526,6 +1526,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       struct ovl_layer *it;
       cleanup_free char *npath = NULL;
       char whiteout_path[PATH_MAX];
+      bool stop_lookup = false;
 
       npath = strdup (ret->path);
       if (npath == NULL)
@@ -1536,12 +1537,15 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       else
         strconcat3 (whiteout_path, PATH_MAX, "/.wh.", name, NULL);
 
-      for (it = layer; it; it = it->next)
+      for (it = layer; it && ! stop_lookup; it = it->next)
         {
           ssize_t s;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
+
+          if (parent && parent->last_layer == it)
+            stop_lookup = true;
 
           if (dir_p)
             {
