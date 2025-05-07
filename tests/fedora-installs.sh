@@ -258,3 +258,18 @@ fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
 stat merged/foo
 
 umount merged
+
+# https://github.com/containers/fuse-overlayfs/issues/444
+
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+
+mkdir -p lower/base/test/test1
+touch lower/base/test/test1/test1-file
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+mv merged/base/test/test1 merged/base/test/tmp
+cp -r merged/base/test/tmp merged/base/test/test1
+
+umount merged

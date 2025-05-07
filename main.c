@@ -1526,6 +1526,7 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       struct ovl_layer *it;
       cleanup_free char *npath = NULL;
       char whiteout_path[PATH_MAX];
+      bool stop_lookup = false;
 
       npath = strdup (ret->path);
       if (npath == NULL)
@@ -1536,12 +1537,15 @@ make_ovl_node (struct ovl_data *lo, const char *path, struct ovl_layer *layer, c
       else
         strconcat3 (whiteout_path, PATH_MAX, "/.wh.", name, NULL);
 
-      for (it = layer; it; it = it->next)
+      for (it = layer; it && ! stop_lookup; it = it->next)
         {
           ssize_t s;
           cleanup_free char *val = NULL;
           cleanup_free char *origin = NULL;
           cleanup_close int fd = -1;
+
+          if (parent && parent->last_layer == it)
+            stop_lookup = true;
 
           if (dir_p)
             {
@@ -4982,42 +4986,6 @@ ovl_readlink (fuse_req_t req, fuse_ino_t ino)
   fuse_reply_readlink (req, buf);
 }
 
-static int
-hide_all (struct ovl_data *lo, struct ovl_node *node)
-{
-  struct ovl_node **nodes;
-  size_t i, nodes_size;
-
-  node = reload_dir (lo, node);
-  if (node == NULL)
-    return -1;
-
-  nodes_size = hash_get_n_entries (node->children) + 2;
-  nodes = malloc (sizeof (struct ovl_node *) * nodes_size);
-  if (nodes == NULL)
-    return -1;
-
-  nodes_size = hash_get_entries (node->children, (void **) nodes, nodes_size);
-  for (i = 0; i < nodes_size; i++)
-    {
-      struct ovl_node *it;
-      int ret;
-
-      it = nodes[i];
-      ret = create_whiteout (lo, node, it->name, false, true);
-      node_free (it);
-
-      if (ret < 0)
-        {
-          free (nodes);
-          return ret;
-        }
-    }
-
-  free (nodes);
-  return 0;
-}
-
 static void
 ovl_mknod (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev)
 {
@@ -5239,21 +5207,9 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
       return;
     }
 
-  if (parent_upperdir_only)
-    {
-      node->last_layer = pnode->last_layer;
-      if (get_timeout (lo) > 0)
-        node->loaded = 1;
-    }
-  else
-    {
-      ret = hide_all (lo, node);
-      if (ret < 0)
-        {
-          fuse_reply_err (req, errno);
-          return;
-        }
-    }
+  node->last_layer = get_upper_layer (lo);
+  if (get_timeout (lo) > 0)
+    node->loaded = 1;
 
   memset (&e, 0, sizeof (e));
 
