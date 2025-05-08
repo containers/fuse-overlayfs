@@ -1,3 +1,10 @@
+* fuse-overlayfs-1.15
+
+- main: lookup upperdir only for created directories.
+- main: allow escaped colons in directory paths.
+- main: use extended override xattr to support devices.
+- remove unsupported option "lazytime".
+
 * fuse-overlayfs-1.14
 
 - isolate security xattrs for STAT_OVERRIDE_CONTAINERS.  Prefix all
