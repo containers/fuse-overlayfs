@@ -2308,6 +2308,17 @@ ovl_dirp (struct fuse_file_info *fi)
   return (struct ovl_dirp *) (uintptr_t) fi->fh;
 }
 
+/* Comparison function for qsort to ensure stable directory entry order.
+   Entries are sorted by name to guarantee consistent offsets across
+   multiple opendir sessions. */
+static int
+compare_nodes_by_name (const void *a, const void *b)
+{
+  struct ovl_node *node_a = *(struct ovl_node **) a;
+  struct ovl_node *node_b = *(struct ovl_node **) b;
+  return strcmp (node_a->name, node_b->name);
+}
+
 static int
 reload_tbl (struct ovl_data *lo, struct ovl_dirp *d, struct ovl_node *node)
 {
@@ -2340,6 +2351,16 @@ reload_tbl (struct ovl_data *lo, struct ovl_dirp *d, struct ovl_node *node)
       it->node_lookups++;
       d->tbl[counter++] = it;
     }
+
+  /* Sort the directory entries by name to ensure stable offsets.
+
+    The kernel FUSE layer caches directory listings using offsets as
+    identifiers. If entries change positions between opendir sessions
+    (which can happen when nodes are freed and recreated between loads),
+    the kernel may incorrectly skip or duplicate entries.
+
+    Sorting ensures the same filename always appears at the same offset. */
+  qsort (&d->tbl[2], counter - 2, sizeof (struct ovl_node *), compare_nodes_by_name);
 
   return 0;
 }
