@@ -1,3 +1,8 @@
+* fuse-overlayfs-1.16
+
+- main: fix incorrect directory entries due to unstable iteration
+  order.
+
 * fuse-overlayfs-1.15
 
 - main: lookup upperdir only for created directories.
