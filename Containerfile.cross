@@ -4,10 +4,10 @@
 #   --build-arg SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) \
 #   --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 \
 #   -f Containerfile.cross .
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.2.1 AS xx
-FROM --platform=$BUILDPLATFORM ubuntu:jammy-20230804 AS fuse-overlayfs
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.8.0 AS xx
+FROM --platform=$BUILDPLATFORM ubuntu:questing AS fuse-overlayfs
 ADD --chmod=0755 \
-  https://raw.githubusercontent.com/reproducible-containers/repro-sources-list.sh/v0.1.0/repro-sources-list.sh \
+  https://raw.githubusercontent.com/reproducible-containers/repro-sources-list.sh/v0.1.4/repro-sources-list.sh \
   /usr/local/bin/repro-sources-list.sh
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -34,7 +34,7 @@ RUN \
   if xx-info is-cross; then gcc="gcc-$(xx-info triple)"; fi; \
   apt-get install -y "${gcc}" "libfuse3-dev:${darch}"
 RUN ./autogen.sh && \
-  LIBS="-ldl" LDFLAGS="-static" ./configure --host=$(xx-info) && \
+  PKG_CONFIG_PATH="/usr/lib/$(xx-info)/pkgconfig" LIBS="-ldl" LDFLAGS="-static" ./configure --host=$(xx-info) && \
   make && mkdir /out && cp fuse-overlayfs /out && \
   file /out/fuse-overlayfs | grep "statically linked"
 
