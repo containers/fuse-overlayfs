@@ -1,9 +1,9 @@
 fuse-overlayfs 1 "User Commands"
-==================================================
+================================
 
 # NAME
 
-fuse-overlayfs - overlayfs FUSE implementation
+fuse-overlayfs - combine directory trees in userspace
 
 # SYNOPSIS
 
@@ -15,9 +15,7 @@ unmounting
 
 # DESCRIPTION
 
-fuse-overlayfs provides an overlayfs FUSE implementation so that it
-can be used since Linux 4.18 by unprivileged users in an user
-namespace.
+**fuse-overlayfs** combines (overlays) two or more directory trees into one. It can be used by unprivileged users in an user namespace. It is built with FUSE and works with Linux 4.18 or newer.
 
 # OPTIONS
 
@@ -67,7 +65,7 @@ The fuse-overlayfs dynamic mapping is an alternative and cheaper way to chown'in
 
 It is useful to share the same storage among different user namespaces and counter effect the mapping done by the user namespace itself, and without requiring to chown the files.
 
-For example, given on the host two files like:
+Take, for example, two files with the following user and group IDs:
 
 ```
 $ stat -c %u:%g lower/a lower/b
@@ -75,7 +73,7 @@ $ stat -c %u:%g lower/a lower/b
 1:1
 ```
 
-When we run in a user namespace with the following configuration:
+Also take note of the following user namespace configuration:
 
 ```
 $ cat /proc/self/uid_map
@@ -83,7 +81,7 @@ $ cat /proc/self/uid_map
          1     110000      65536
 ```
 
-We would see:
+After mounting with fuse-overlayfs, the ownership would change:
 
 ```
 $ stat -c %u:%g merged/a merged/b
@@ -91,7 +89,7 @@ $ stat -c %u:%g merged/a merged/b
 65534:65534
 ```
 
-65534 is the overflow ID used when the UID/GID is not known inside the user namespace. This happens because both users 0:0 and 1:1 are not mapped.
+65534 is the overflow ID used when the UID/GID is not known inside the user namespace. This happens because neither user IDs 0 nor 1 are mapped.
 
 To map them, we'd mount the fuse-overlayfs file system using the following namespace configuration:
 
