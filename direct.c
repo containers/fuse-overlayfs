@@ -165,10 +165,80 @@ direct_readlinkat (struct ovl_layer *l, const char *path, char *buf, size_t bufs
   return TEMP_FAILURE_RETRY (readlinkat (l->fd, path, buf, bufsiz));
 }
 
+static ino_t
+direct_get_nfs_filehandle (const struct ovl_layer *l, const char *path)
+{
+  int mount_id;
+  int ret = name_to_handle_at (l->fd, path, l->fh, &mount_id, 0);
+  if (ret == -1)
+    return 0;
+
+  ino_t h = 0xcbf29ce484222325ULL;
+  for (size_t i = 0; i < l->fh->handle_bytes; i++)
+    {
+      h ^= l->fh->f_handle[i];
+      h *= 0x100000001b3ULL;
+    }
+
+  return h;
+}
+
+/* Returns:
+   -1 - Error
+   0  - NFS filehandles not supported
+   1  - Can use NFS filehandles */
+static int
+has_nfs_filehandles (struct ovl_layer *l, const char *path)
+{
+  struct file_handle *tmp_fh;
+  int mount_id;
+  int ret;
+
+  tmp_fh = malloc (sizeof (*tmp_fh));
+  if (tmp_fh == NULL)
+    return -1;
+
+  tmp_fh->handle_bytes = 0;
+
+  ret = name_to_handle_at (AT_FDCWD, path, tmp_fh, &mount_id, 0);
+  if (ret == -1 && errno == ENOTSUP)
+    {
+      free (tmp_fh);
+      return 0;
+    }
+  /* previous call should fail with EOVERFLOW and handle_bytes replaced with
+   * the size of the handle. EOVERFLOW can also occur if no filehandle is
+   * available in a system that does support file-handle lookup.
+   */
+  if (ret != -1 || errno != EOVERFLOW || tmp_fh->handle_bytes == 0)
+    {
+      free (tmp_fh);
+      return -1;
+    }
+
+  l->fh = realloc (tmp_fh, tmp_fh->handle_bytes + sizeof (*l->fh));
+  if (! l->fh)
+    {
+      free (tmp_fh);
+      return -1;
+    }
+
+  ret = name_to_handle_at (AT_FDCWD, path, l->fh, &mount_id, 0);
+
+  if (ret == -1)
+    {
+      free (l->fh);
+      l->fh = NULL;
+      return 0;
+    }
+  return 1;
+}
+
 static int
 direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *path, int n_layer)
 {
   char tmp[64];
+  struct stat st;
   l->path = realpath (path, NULL);
   if (l->path == NULL)
     {
@@ -183,6 +253,18 @@ direct_load_data_source (struct ovl_layer *l, const char *opaque, const char *pa
       l->path = NULL;
       return l->fd;
     }
+
+  if (fstat (l->fd, &st) == -1)
+    {
+      close (l->fd);
+      free (l->path);
+      l->path = NULL;
+      return -1;
+    }
+  else
+    l->st_dev = st.st_dev;
+
+  l->nfs_filehandles = has_nfs_filehandles (l, l->path);
 
   if (fgetxattr (l->fd, XATTR_PRIVILEGED_OVERRIDE_STAT, tmp, sizeof (tmp)) >= 0)
     l->stat_override_mode = STAT_OVERRIDE_PRIVILEGED;
@@ -230,4 +312,5 @@ struct data_source direct_access_ds = {
   .listxattr = direct_listxattr,
   .readlinkat = direct_readlinkat,
   .support_acls = direct_support_acls,
+  .get_nfs_filehandle = direct_get_nfs_filehandle,
 };

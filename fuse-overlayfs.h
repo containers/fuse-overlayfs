@@ -105,6 +105,9 @@ struct ovl_data
   int squash_to_uid;
   int squash_to_gid;
   int static_nlink;
+  int ino_passthrough;
+  int nfs_filehandles;
+  int ino_t_32;
 
   int volatile_mode;
 
@@ -137,6 +140,10 @@ struct ovl_layer
 
   void *data_source_private_data;
   int stat_override_mode;
+
+  dev_t st_dev;
+  int nfs_filehandles;
+  struct file_handle *fh;
 };
 
 /* a data_source defines the methods for accessing a lower layer.  */
@@ -156,6 +163,7 @@ struct data_source
   int (*getxattr) (struct ovl_layer *l, const char *path, const char *name, char *buf, size_t size);
   ssize_t (*readlinkat) (struct ovl_layer *l, const char *path, char *buf, size_t bufsiz);
   bool (*support_acls) (struct ovl_layer *l);
+  ino_t (*get_nfs_filehandle) (const struct ovl_layer *l, const char *path);
 };
 
 /* passthrough to the file system.  */

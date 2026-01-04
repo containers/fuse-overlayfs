@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdalign.h>
 #include <string.h>
 #include <dirent.h>
 #include <assert.h>
@@ -229,12 +230,17 @@ static const struct fuse_opt ovl_opts[] = {
     offsetof (struct ovl_data, squash_to_uid), 1 },
   { "squash_to_gid=%d",
     offsetof (struct ovl_data, squash_to_gid), 1 },
+  { "ino32_t",
+    offsetof (struct ovl_data, ino_t_32), 1 },
   { "static_nlink",
     offsetof (struct ovl_data, static_nlink), 1 },
   { "volatile", /* native overlay supports "volatile" to mean fsync=0.  */
     offsetof (struct ovl_data, volatile_mode), 1 },
   { "noacl",
     offsetof (struct ovl_data, noacl), 1 },
+  FUSE_OPT_KEY ("xino=off", 1),
+  FUSE_OPT_KEY ("xino=auto", 2),
+  FUSE_OPT_KEY ("xino=on", 3),
   FUSE_OPT_END
 };
 
@@ -275,7 +281,7 @@ get_next_wd_counter ()
 }
 
 static ino_t
-node_to_inode (struct ovl_node *n)
+node_to_inode (const struct ovl_node *n)
 {
   return (ino_t) n->ino;
 }
@@ -467,6 +473,10 @@ ovl_init (void *userdata, struct fuse_conn_info *conn)
   conn->want |= FUSE_CAP_DONT_MASK | FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
   if (lo->writeback)
     conn->want |= FUSE_CAP_WRITEBACK_CACHE;
+#ifdef FUSE_CAP_NO_EXPORT_SUPPORT
+  if (! lo->ino_passthrough && ! lo->nfs_filehandles && (conn->capable & FUSE_CAP_NO_EXPORT_SUPPORT))
+    conn->want |= FUSE_CAP_NO_EXPORT_SUPPORT;
+#endif
 }
 
 static struct ovl_layer *
@@ -938,6 +948,26 @@ get_gid (struct ovl_data *data, gid_t id)
   return find_mapping (id, data, false, false);
 }
 
+static ino_t
+get_st_ino (const struct ovl_node *node, const struct ovl_data *data)
+{
+  const struct ovl_layer *l = node->layer;
+
+  uint64_t ino;
+
+  if (data->ino_passthrough)
+    ino = node->tmp_ino;
+  else if (data->nfs_filehandles)
+    ino = l->ds->get_nfs_filehandle (l, node->path);
+  else
+    ino = node_to_inode (node) >> __builtin_ctz (alignof (max_align_t));
+
+  if (data->ino_t_32)
+    return (uint32_t) ino;
+
+  return ino;
+}
+
 static int
 rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struct stat *st_in, struct stat *st)
 {
@@ -955,9 +985,7 @@ rpl_stat (fuse_req_t req, struct ovl_node *node, int fd, const char *path, struc
 
   st->st_uid = find_mapping (st->st_uid, data, true, true);
   st->st_gid = find_mapping (st->st_gid, data, true, false);
-
-  st->st_ino = node->tmp_ino;
-  st->st_dev = node->tmp_dev;
+  st->st_ino = get_st_ino (node, data);
 
   if (node->loaded && node->n_links > 0)
     st->st_nlink = node->n_links;
@@ -2081,6 +2109,12 @@ read_dirs (struct ovl_data *lo, char *path, bool low, struct ovl_layer *layers)
           l->path = NULL;
           l->fd = -1;
 
+          /* If the plugin doesn't override it, we set st_dev to a hash of the
+           * text configuring the plugin.  This means that different layers
+           * will be deemed to be on different devices.
+           */
+          l->st_dev = hash_string (it, -1);
+
           if (l->ds->load_data_source (l, data, path, i) < 0)
             {
               fprintf (stderr, "cannot load store %s at %s\n", data, path);
@@ -2553,8 +2587,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
           /* From the 'stbuf' argument the st_ino field and bits 12-15 of the
            * st_mode field are used.  The other fields are ignored.
            */
-          st->st_ino = node->tmp_ino;
-          st->st_dev = node->tmp_dev;
+          st->st_ino = get_st_ino (node, lo);
           st->st_mode = node->ino->mode;
 
           entsize = fuse_add_direntry (req, p, remaining, name, st, offset + 1);
@@ -5620,6 +5653,12 @@ fuse_opt_proc (void *data, const char *arg, int key, struct fuse_args *outargs)
   if (strcmp (arg, "ro") == 0)
     return 1;
 
+  if (key >= 1 && key <= 3)
+    {
+      ovl_data->nfs_filehandles = key - 1;
+      return 0;
+    }
+
   if (key == FUSE_OPT_KEY_NONOPT)
     {
       if (ovl_data->mountpoint)
@@ -5730,6 +5769,9 @@ main (int argc, char *argv[])
     .squash_to_uid = -1,
     .squash_to_gid = -1,
     .static_nlink = 0,
+    .ino_passthrough = 1,
+    .nfs_filehandles = 0,
+    .ino_t_32 = 0,
     .xattr_permissions = 0,
     .euid = geteuid (),
     .timeout = 1000000000.0,
@@ -5836,8 +5878,24 @@ main (int argc, char *argv[])
 
   lo.layers = layers;
 
-  for (tmp_layer = layers; ! lo.noacl && tmp_layer; tmp_layer = tmp_layer->next)
+  for (tmp_layer = layers; tmp_layer; tmp_layer = tmp_layer->next)
     {
+      if (tmp_layer->st_dev != layers->st_dev)
+        lo.ino_passthrough = 0;
+      if (tmp_layer->nfs_filehandles == -1)
+        {
+          if (lo.nfs_filehandles == 2)
+            error (EXIT_FAILURE, 0, "Unexpected error on %s while checking for nfs filehandle support", tmp_layer->path);
+          else
+            warn ("Unexpected error on %s while checking for nfs filehandle support", tmp_layer->path);
+          lo.nfs_filehandles = 0;
+        }
+      else if (tmp_layer->nfs_filehandles == 0)
+        {
+          if (lo.nfs_filehandles == 2)
+            error (EXIT_FAILURE, 0, "xino=on but %s does not support nfs filehandles", tmp_layer->path);
+          lo.nfs_filehandles = 0;
+        }
       if (! tmp_layer->ds->support_acls (tmp_layer))
         lo.noacl = 1;
     }
