@@ -33,7 +33,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
-#include <limits.h>
 #include <dirent.h>
 #include <assert.h>
 #include <errno.h>
@@ -69,9 +68,9 @@
 
 #ifndef TEMP_FAILURE_RETRY
 #  define TEMP_FAILURE_RETRY(expression) \
-    (__extension__ ({ long int __result;                                                     \
-       do __result = (long int) (expression);                                 \
-       while (__result == -1L && errno == EINTR);                             \
+    (__extension__({ long int __result;                 \
+       do __result = (long int) (expression);           \
+       while (__result == -1L && errno == EINTR);       \
        __result; }))
 #endif
 
@@ -156,8 +155,8 @@ open_by_handle_at (int mount_fd, struct file_handle *handle, int flags)
 #endif
 
 #if defined(__GNUC__) && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 6) && ! defined __cplusplus
-_Static_assert (sizeof (fuse_ino_t) >= sizeof (uintptr_t),
-                "fuse_ino_t too small to hold uintptr_t values!");
+_Static_assert(sizeof (fuse_ino_t) >= sizeof (uintptr_t),
+               "fuse_ino_t too small to hold uintptr_t values!");
 #else
 struct _uintptr_to_must_hold_fuse_ino_t_dummy_struct
 {
@@ -308,7 +307,7 @@ check_writeable_proc ()
 
   if (svfs.f_type != PROC_SUPER_MAGIC)
     {
-      fprintf (stderr, "invalid file system type found on /proc: %d, expected %d\n", svfs.f_fsid, PROC_SUPER_MAGIC);
+      fprintf (stderr, "invalid file system type found on /proc: %ld, expected %d\n", (long) svfs.f_type, PROC_SUPER_MAGIC);
       return;
     }
 
@@ -5758,7 +5757,7 @@ main (int argc, char *argv[])
 
   read_overflowids ();
 
-  pthread_mutex_init (&lock, PTHREAD_MUTEX_DEFAULT);
+  pthread_mutex_init (&lock, NULL);
 
   if (opts.show_help)
     {
