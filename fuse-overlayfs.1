@@ -9,11 +9,11 @@ fuse-overlayfs - overlayfs FUSE implementation
 .SH SYNOPSIS
 .PP
 mounting
-    fuse-overlayfs [-f] [--debug] [-o OPTS] MOUNT_TARGET
+    fuse-overlayfs [\-f] [\-\-debug] [\-o OPTS] MOUNT_TARGET
 
 .PP
 unmounting
-    fusermount -u mountpoint
+    fusermount \-u mountpoint
 
 
 .SH DESCRIPTION
@@ -25,26 +25,26 @@ namespace.
 
 .SH OPTIONS
 .PP
-\fB--debug\fP
+\fB\-\-debug\fP
 Enable debugging mode, can be very noisy.
 
 .PP
-\fB-o lowerdir=low1[:low2...]\fP
+\fB\-o lowerdir=low1[:low2...]\fP
 A list of directories separated by \fB\fC:\fR\&.  Their content is merged.
 
 .PP
-\fB-o upperdir=upperdir\fP
+\fB\-o upperdir=upperdir\fP
 A directory merged on top of all the lowerdirs where all the changes
 done to the file system will be written.
 
 .PP
-\fB-o workdir=workdir\fP
+\fB\-o workdir=workdir\fP
 A directory used internally by fuse-overlays, must be on the same file
 system as the upper dir.
 
 .PP
-\fB-o uidmapping=UID:MAPPED-UID:LEN[,UID2:MAPPED-UID2:LEN2]\fP
-\fB-o gidmapping=GID:MAPPED-GID:LEN[,GID2:MAPPED-GID2:LEN2]\fP
+\fB\-o uidmapping=UID:MAPPED-UID:LEN[,UID2:MAPPED-UID2:LEN2]\fP
+\fB\-o gidmapping=GID:MAPPED-GID:LEN[,GID2:MAPPED-GID2:LEN2]\fP
 Specifies the dynamic UID/GID mapping used by fuse-overlayfs when
 reading/writing files to the system.
 
@@ -62,7 +62,7 @@ without requiring to chown the files.
 For example, given on the host two files like:
 
 .PP
-$ stat -c %u:%g lower/a lower/b
+$ stat \-c %u:%g lower/a lower/b
 0:0
 1:1
 
@@ -76,7 +76,7 @@ $ cat /proc/self/uid_map
 We would see:
 
 .PP
-$ stat -c %u:%g merged/a merged/b
+$ stat \-c %u:%g merged/a merged/b
 65534:65534
 65534:65534
 
@@ -87,12 +87,12 @@ mapped.
 
 .PP
 In the above example, if we mount the fuse-overlayfs file system using:
-\fB\fC-ouidmapping=0:1000:1:1:110000:65536,gidmapping=0:1000:1:1:110000:65536\fR,
+\fB\fC\-ouidmapping=0:1000:1:1:110000:65536,gidmapping=0:1000:1:1:110000:65536\fR,
 which is the namespace configuration specified on a single line, we'd
 see from the same user namespace:
 
 .PP
-$ stat -c %u:%g merged/a merged/b
+$ stat \-c %u:%g merged/a merged/b
 0:0
 1:1
 
@@ -100,19 +100,19 @@ $ stat -c %u:%g merged/a merged/b
 Those are the same IDs visible from outside the user namespace.
 
 .PP
-\fB-o squash_to_root\fP
+\fB\-o squash_to_root\fP
 Every file and directory is owned by the root user (0:0).
 
 .PP
-\fB-o squash_to_uid=uid\fP
-\fB-o squash_to_gid=gid\fP
+\fB\-o squash_to_uid=uid\fP
+\fB\-o squash_to_gid=gid\fP
 Every file and directory is owned by the specified uid or gid.
 
 .PP
 It has higher precedence over \fBsquash_to_root\fP\&.
 
 .PP
-\fB-o static_nlink\fP
+\fB\-o static_nlink\fP
 Set st_nlink to the static value 1 for all directories.
 
 .PP
@@ -122,9 +122,51 @@ be a slow operation. With this option enabled, the number of hard
 links reported when running stat for any directory is 1.
 
 .PP
-\fB-o noacl\fP
+\fB\-o noacl\fP
 Disable ACL support in the FUSE file system.
 
+.PP
+\fB\-o xino=off|auto|on\fP
+Controls how \fIst_ino\fP values are generated for files exposed by fuse-overlayfs.
+
+When all lower and upper layers reside on the same underlying device,
+fuse-overlayfs exposes the real inode number from the underlying filesystem.
+When layers span multiple devices, an opaque inode number is generated; by
+default this value is not stable across mounts.
+
+The \fBxino\fP option modifies this behavior:
+
+.PP
+\fB\-o xino=off\fP
+Disables extended inode generation. This matches the default behavior:
+when all layers are on the same device, the underlying inode number is used;
+otherwise an opaque, non‑stable inode number is returned.
+
+.PP
+\fB\-o xino=auto\fP
+Attempts to generate stable inode numbers across mounts by hashing the file
+handle returned by \fIname_to_handle_at\fP(2).
+This mode is used only if all layers support \fIname_to_handle_at\fP(2); if any
+layer does not, behavior falls back to \fBxino=off\fP.
+If all layers are on the same device, the underlying inode number is still
+used, regardless of this setting.
+
+.PP
+\fB\-o xino=on\fP
+Requires that all layers support \fIname_to_handle_at\fP(2). If they do, inode
+numbers are derived from a hash of the file handle and remain stable across
+mounts.
+If any layer does not support \fIname_to_handle_at\fP(2), the mount fails.
+As with other modes, when all layers are on the same device, the underlying
+inode number always takes precedence.
+
+.PP
+\fB\-o ino32_t\fP
+Forces all returned \fIst_ino\fP values to be truncated to 32 bits.
+
+This option exists solely for compatibility with older 32‑bit userspaces that
+cannot correctly handle 64‑bit inode numbers. It has no functional benefit on
+modern systems and should not be used unless required for legacy compatibility.
 
 .SH SEE ALSO
 .PP
