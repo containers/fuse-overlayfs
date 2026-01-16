@@ -5,7 +5,8 @@
 #   --platform=amd64,arm64,arm,s390x,ppc64le,riscv64 \
 #   -f Containerfile.cross .
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.8.0 AS xx
-FROM --platform=$BUILDPLATFORM ubuntu:questing AS fuse-overlayfs
+# Use ubuntu:<LTS>-<yyyyMMdd> for reproducibility
+FROM --platform=$BUILDPLATFORM ubuntu:noble-20251001 AS fuse-overlayfs
 ADD --chmod=0755 \
   https://raw.githubusercontent.com/reproducible-containers/repro-sources-list.sh/v0.1.4/repro-sources-list.sh \
   /usr/local/bin/repro-sources-list.sh
