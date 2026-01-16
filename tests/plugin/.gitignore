@@ -1,0 +1,7 @@
+!Makefile
+convert
+shared-storage-plugin.so
+fuse-overlayfs.h
+plugin-manager.h
+utils.c
+utils.h
