@@ -27,7 +27,7 @@ and works with Linux 4.18 or newer.
 **-d**, **--debug**, **-o debug**
 :   Enable debugging mode, can be very noisy.
 
-**-o lowerdir=**_low1_[_:low2..._]
+**-o lowerdir**=_low1_[_:low2..._]
 :   A list of directories separated by `:`.  Their content is merged.
 
 **-o upperdir**=_upperdir_
@@ -38,9 +38,9 @@ to the file system will be written.
 :   A directory used internally by fuse-overlays, must be on the same file
 system as the upperdir.
 
-**-o uidmapping=**_UID:MAPPED-UID:LEN_[_,UID2:MAPPED-UID2:LEN2_]
+**-o uidmapping**=_UID:MAPPED-UID:LEN_[_,UID2:MAPPED-UID2:LEN2_]
 
-**-o gidmapping=**_GID:MAPPED-GID:LEN_[_,GID2:MAPPED-GID2:LEN2_]
+**-o gidmapping**=_GID:MAPPED-GID:LEN_[_,GID2:MAPPED-GID2:LEN2_]
 :   Specify the dynamic UID/GID mapping used by fuse-overlayfs when
 reading/writing files to the system.
 
@@ -63,7 +63,7 @@ any directory is 1.
 **-o noacl**
 :   Disable ACL support in the FUSE file system.
 
-**-o xino=off|auto|on**
+**-o xino**=**off**|**auto**|**on**
 :   Controls how `st_ino` values are generated for files returned by
 fuse-overlayfs. When all lower and upper layers reside on the same underlying
 device, fuse-overlayfs exposes the real inode number from the underlying
@@ -72,19 +72,19 @@ generated; by default this value is not stable across mounts.
 
 The `xino` option modifies this behavior:
 
-**xino=off**
+**xino**=**off**
 :   Disables extended inode generation. This matches the default behavior: when
 all layers are on the same device, the underlying inode number is used;
 otherwise an opaque, non‑stable inode number is returned.
 
-**xino=auto**
+**xino**=**auto**
 :   Attempts to generate stable inode numbers across mounts by hashing the file
 handle returned by `name_to_handle_at(2)`. This mode is used only if all layers
 support `name_to_handle_at(2)`; if any layer does not, behavior falls back to
 `xino=off`. If all layers are on the same device, the underlying inode number
 is still used, regardless of this setting.
 
-**xino=on**
+**xino**=**on**
 :   Requires that all layers support `name_to_handle_at(2)`. If they do, inode
 numbers are derived from a hash of the file handle and remain stable across
 mounts. If any layer does not support `name_to_handle_at(2)`, the mount fails.
