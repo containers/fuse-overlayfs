@@ -1,179 +1,226 @@
 .nh
-.TH fuse-overlayfs 1 "User Commands"
+.TH fuse\-overlayfs 1 "User Commands"
 
 .SH NAME
 .PP
-fuse-overlayfs - overlayfs FUSE implementation
+fuse\-overlayfs \- combine directory trees in userspace
 
 
 .SH SYNOPSIS
-.PP
+.TP
 mounting
-    fuse-overlayfs [\-f] [\-\-debug] [\-o OPTS] MOUNT_TARGET
+\fBfuse\-overlayfs\fP [\fB\-f\fP] [\fB\-d\fP] [\fB\-o\fP \fIOPTION\fP[,\fIOPTION2\fP, ...]] \fImountpoint\fP
 
-.PP
+.TP
 unmounting
-    fusermount \-u mountpoint
+\fBfusermount \-u\fP \fImountpoint\fP
 
 
 .SH DESCRIPTION
 .PP
-fuse-overlayfs provides an overlayfs FUSE implementation so that it
-can be used since Linux 4.18 by unprivileged users in an user
-namespace.
+\fBfuse\-overlayfs\fP combines (overlays) two or more directory trees into one. It
+can be used by unprivileged users in an user namespace. It is built with FUSE
+and works with Linux 4.18 or newer.
 
 
 .SH OPTIONS
-.PP
-\fB\-\-debug\fP
+.TP
+\fB\-f\fP
+Run in foreground.
+
+.TP
+\fB\-d\fP, \fB\-\-debug\fP, \fB\-o debug\fP
 Enable debugging mode, can be very noisy.
 
-.PP
-\fB\-o lowerdir=low1[:low2...]\fP
+.TP
+\fB\-o lowerdir\fP=\fIlow1\fP[\fI:low2...\fP]
 A list of directories separated by \fB\fC:\fR\&.  Their content is merged.
 
-.PP
-\fB\-o upperdir=upperdir\fP
-A directory merged on top of all the lowerdirs where all the changes
-done to the file system will be written.
+.TP
+\fB\-o upperdir\fP=\fIupperdir\fP
+A directory merged on top of all the lowerdirs where all the changes done
+to the file system will be written.
+
+.TP
+\fB\-o workdir\fP=\fIworkdir\fP
+A directory used internally by fuse\-overlays, must be on the same file
+system as the upperdir.
 
 .PP
-\fB\-o workdir=workdir\fP
-A directory used internally by fuse-overlays, must be on the same file
-system as the upper dir.
+\fB\-o uidmapping\fP=\fIUID:MAPPED\-UID:LEN\fP[\fI,UID2:MAPPED\-UID2:LEN2\fP]
 
-.PP
-\fB\-o uidmapping=UID:MAPPED-UID:LEN[,UID2:MAPPED-UID2:LEN2]\fP
-\fB\-o gidmapping=GID:MAPPED-GID:LEN[,GID2:MAPPED-GID2:LEN2]\fP
-Specifies the dynamic UID/GID mapping used by fuse-overlayfs when
+.TP
+\fB\-o gidmapping\fP=\fIGID:MAPPED\-GID:LEN\fP[\fI,GID2:MAPPED\-GID2:LEN2\fP]
+Specify the dynamic UID/GID mapping used by fuse\-overlayfs when
 reading/writing files to the system.
 
-.PP
-The fuse-overlayfs dynamic mapping is an alternative and cheaper way
-to chown'ing the files on the host to accommodate the user namespace
-settings.
+.TP
+\fB\-o squash\_to\_root\fP
+Make every file and directory owned by the root user (0:0).
 
 .PP
-It is useful to share the same storage among different user namespaces
-and counter effect the mapping done by the user namespace itself, and
-without requiring to chown the files.
+\fB\-o squash\_to\_uid\fP=\fIuid\fP
+
+.TP
+\fB\-o squash\_to\_gid\fP=\fIgid\fP
+Make every file and directory owned by the specified uid or gid. It has
+higher precedence over \fBsquash\_to\_root\fP\&.
+
+.TP
+\fB\-o static\_nlink\fP
+Set \fB\fCst\_nlink\fR to the static value 1 for all directories. This can be
+useful for higher latency file systems such as NFS, where counting the number
+of hard links for a directory with many files can be a slow operation. With
+this option enabled, the number of hard links reported when running stat for
+any directory is 1.
+
+.TP
+\fB\-o noacl\fP
+Disable ACL support in the FUSE file system.
+
+.TP
+\fB\-o xino\fP=\fBoff\fP|\fBauto\fP|\fBon\fP
+Controls how \fB\fCst\_ino\fR values are generated for files returned by
+fuse\-overlayfs. When all lower and upper layers reside on the same underlying
+device, fuse\-overlayfs exposes the real inode number from the underlying
+filesystem. When layers span multiple devices, an opaque inode number is
+generated; by default this value is not stable across mounts.
 
 .PP
-For example, given on the host two files like:
+The \fB\fCxino\fR option modifies this behavior:
+
+.TP
+\fBxino\fP=\fBoff\fP
+Disables extended inode generation. This matches the default behavior: when
+all layers are on the same device, the underlying inode number is used;
+otherwise an opaque, non‑stable inode number is returned.
+
+.TP
+\fBxino\fP=\fBauto\fP
+Attempts to generate stable inode numbers across mounts by hashing the file
+handle returned by \fB\fCname\_to\_handle\_at(2)\fR\&. This mode is used only if all layers
+support \fB\fCname\_to\_handle\_at(2)\fR; if any layer does not, behavior falls back to
+\fB\fCxino=off\fR\&. If all layers are on the same device, the underlying inode number
+is still used, regardless of this setting.
+
+.TP
+\fBxino\fP=\fBon\fP
+Requires that all layers support \fB\fCname\_to\_handle\_at(2)\fR\&. If they do, inode
+numbers are derived from a hash of the file handle and remain stable across
+mounts. If any layer does not support \fB\fCname\_to\_handle\_at(2)\fR, the mount fails.
+As with other modes, when all layers are on the same device, the underlying
+inode number always takes precedence.
+
+.TP
+\fB\-o ino32\_t\fP
+Forces all returned \fB\fCst\_ino\fR values to be truncated to 32 bits. This option
+exists solely for compatibility with older 32‑bit userspaces that cannot
+correctly handle 64‑bit inode numbers. It has no functional benefit on modern
+systems and should not be used unless required for legacy compatibility.
+
+.TP
+\fB\-h\fP, \fB\-\-help\fP
+Show additional options, provided by FUSE.
+
+.TP
+\fB\-V\fP, \fB\-\-version\fP
+Show versions of fuse\-overlayfs and FUSE.
+
+
+.SH DYNAMIC UID AND GID MAPPING
+.PP
+The fuse\-overlayfs dynamic mapping is an alternative and cheaper way to
+chown'ing the files on the host to accommodate the user namespace settings.
 
 .PP
+It is useful to share the same storage among different user namespaces and
+counter effect the mapping done by the user namespace itself, and without
+requiring to chown the files.
+
+.PP
+Take, for example, two files with the following user and group IDs:
+
+.PP
+.RS
+
+.nf
 $ stat \-c %u:%g lower/a lower/b
 0:0
 1:1
 
+.fi
+.RE
+
 .PP
-When we run in a user namespace with the following configuration:
-$ cat /proc/self/uid_map
+Also take note of the following user namespace configuration:
+
+.PP
+.RS
+
+.nf
+$ cat /proc/self/uid\_map
          0       1000          1
          1     110000      65536
 
-.PP
-We would see:
+.fi
+.RE
 
 .PP
+After mounting with fuse\-overlayfs, the ownership would change:
+
+.PP
+.RS
+
+.nf
 $ stat \-c %u:%g merged/a merged/b
 65534:65534
 65534:65534
 
-.PP
-65534 is the overflow id used when the UID/GID is not known inside the
-user namespace.  This happens because both users 0:0 and 1:1 are not
-mapped.
+.fi
+.RE
 
 .PP
-In the above example, if we mount the fuse-overlayfs file system using:
-\fB\fC\-ouidmapping=0:1000:1:1:110000:65536,gidmapping=0:1000:1:1:110000:65536\fR,
-which is the namespace configuration specified on a single line, we'd
-see from the same user namespace:
+65534 is the overflow ID used when the UID/GID is not known inside the user
+namespace. This happens because neither user IDs 0 nor 1 are mapped.
 
 .PP
+To map them, we'd mount the fuse\-overlayfs file system using the following
+namespace configuration:
+
+.PP
+.RS
+
+.nf
+\-o uidmapping=0:1000:1:1:110000:65536,gidmapping=0:1000:1:1:110000:65536
+
+.fi
+.RE
+
+.PP
+The result would then be the following:
+
+.PP
+.RS
+
+.nf
 $ stat \-c %u:%g merged/a merged/b
 0:0
 1:1
 
+.fi
+.RE
+
 .PP
 Those are the same IDs visible from outside the user namespace.
 
-.PP
-\fB\-o squash_to_root\fP
-Every file and directory is owned by the root user (0:0).
-
-.PP
-\fB\-o squash_to_uid=uid\fP
-\fB\-o squash_to_gid=gid\fP
-Every file and directory is owned by the specified uid or gid.
-
-.PP
-It has higher precedence over \fBsquash_to_root\fP\&.
-
-.PP
-\fB\-o static_nlink\fP
-Set st_nlink to the static value 1 for all directories.
-
-.PP
-This can be useful for higher latency file systems such as NFS, where
-counting the number of hard links for a directory with many files can
-be a slow operation. With this option enabled, the number of hard
-links reported when running stat for any directory is 1.
-
-.PP
-\fB\-o noacl\fP
-Disable ACL support in the FUSE file system.
-
-.PP
-\fB\-o xino=off|auto|on\fP
-Controls how \fIst_ino\fP values are generated for files exposed by fuse-overlayfs.
-
-When all lower and upper layers reside on the same underlying device,
-fuse-overlayfs exposes the real inode number from the underlying filesystem.
-When layers span multiple devices, an opaque inode number is generated; by
-default this value is not stable across mounts.
-
-The \fBxino\fP option modifies this behavior:
-
-.PP
-\fB\-o xino=off\fP
-Disables extended inode generation. This matches the default behavior:
-when all layers are on the same device, the underlying inode number is used;
-otherwise an opaque, non‑stable inode number is returned.
-
-.PP
-\fB\-o xino=auto\fP
-Attempts to generate stable inode numbers across mounts by hashing the file
-handle returned by \fIname_to_handle_at\fP(2).
-This mode is used only if all layers support \fIname_to_handle_at\fP(2); if any
-layer does not, behavior falls back to \fBxino=off\fP.
-If all layers are on the same device, the underlying inode number is still
-used, regardless of this setting.
-
-.PP
-\fB\-o xino=on\fP
-Requires that all layers support \fIname_to_handle_at\fP(2). If they do, inode
-numbers are derived from a hash of the file handle and remain stable across
-mounts.
-If any layer does not support \fIname_to_handle_at\fP(2), the mount fails.
-As with other modes, when all layers are on the same device, the underlying
-inode number always takes precedence.
-
-.PP
-\fB\-o ino32_t\fP
-Forces all returned \fIst_ino\fP values to be truncated to 32 bits.
-
-This option exists solely for compatibility with older 32‑bit userspaces that
-cannot correctly handle 64‑bit inode numbers. It has no functional benefit on
-modern systems and should not be used unless required for legacy compatibility.
 
 .SH SEE ALSO
 .PP
-\fBfuse\fP(8), \fBmount\fP(8), \fBuser_namespaces\fP(7)
+\fBfuse\fP(8), \fBmount\fP(8), \fBuser\_namespaces\fP(7)
 
 
 .SH AVAILABILITY
 .PP
-The fuse-overlayfs command is available from
-\fBhttps://github.com/containers/fuse-overlayfs\fP under GNU GENERAL PUBLIC LICENSE Version 3 or later.
+The fuse\-overlayfs command is available from
+\fBhttps://github.com/containers/fuse\-overlayfs\fP under GNU GENERAL PUBLIC
+LICENSE Version 3 or later.
