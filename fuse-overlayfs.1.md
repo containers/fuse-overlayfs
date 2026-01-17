@@ -53,6 +53,40 @@ unmounting
 **-o noacl**
 :   Disable ACL support in the FUSE file system.
 
+**-o xino=off|auto|on**
+:   Controls how `st_ino` values are generated for files returned by
+fuse-overlayfs. When all lower and upper layers reside on the same underlying
+device, fuse-overlayfs exposes the real inode number from the underlying
+filesystem. When layers span multiple devices, an opaque inode number is
+generated; by default this value is not stable across mounts.
+
+The `xino` option modifies this behavior:
+
+**xino=off**
+:   Disables extended inode generation. This matches the default behavior: when
+all layers are on the same device, the underlying inode number is used;
+otherwise an opaque, non‑stable inode number is returned.
+
+**xino=auto**
+:   Attempts to generate stable inode numbers across mounts by hashing the file
+handle returned by `name_to_handle_at(2)`. This mode is used only if all layers
+support `name_to_handle_at(2)`; if any layer does not, behavior falls back to
+`xino=off`. If all layers are on the same device, the underlying inode number
+is still used, regardless of this setting.
+
+**xino=on**
+:   Requires that all layers support `name_to_handle_at(2)`. If they do, inode
+numbers are derived from a hash of the file handle and remain stable across
+mounts. If any layer does not support `name_to_handle_at(2)`, the mount fails.
+As with other modes, when all layers are on the same device, the underlying
+inode number always takes precedence.
+
+**-o ino32_t**
+:   Forces all returned `st_ino` values to be truncated to 32 bits. This option
+exists solely for compatibility with older 32‑bit userspaces that cannot
+correctly handle 64‑bit inode numbers. It has no functional benefit on modern
+systems and should not be used unless required for legacy compatibility.
+
 **-h**, **--help**
 :   Show additional options, provided by FUSE.
 
@@ -106,64 +140,6 @@ $ stat -c %u:%g merged/a merged/b
 ```
 
 Those are the same IDs visible from outside the user namespace.
-
-**-o squash_to_root**
-Every file and directory is owned by the root user (0:0).
-
-**-o squash_to_uid=uid**
-**-o squash_to_gid=gid**
-Every file and directory is owned by the specified uid or gid.
-
-It has higher precedence over **squash_to_root**.
-
-**-o static_nlink**
-Set st_nlink to the static value 1 for all directories.
-
-This can be useful for higher latency file systems such as NFS, where
-counting the number of hard links for a directory with many files can
-be a slow operation. With this option enabled, the number of hard
-links reported when running stat for any directory is 1.
-
-**-o noacl**
-Disable ACL support in the FUSE file system.
-
-**-o xino=off|auto|on**
-Controls how `st_ino` values are generated for files returned by fuse-overlayfs.
-
-When all lower and upper layers reside on the same underlying device,
-fuse-overlayfs exposes the real inode number from the underlying filesystem.
-When layers span multiple devices, an opaque inode number is generated; by
-default this value is not stable across mounts.
-
-The `xino` option modifies this behavior:
-
-**xino=off**
-Disables extended inode generation. This matches the default behavior:
-when all layers are on the same device, the underlying inode number is used;
-otherwise an opaque, non‑stable inode number is returned.
-
-**xino=auto**
-Attempts to generate stable inode numbers across mounts by hashing the file
-handle returned by `name_to_handle_at(2)`.
-This mode is used only if all layers support `name_to_handle_at(2)`; if any
-layer does not, behavior falls back to `xino=off`.
-If all layers are on the same device, the underlying inode number is still
-used, regardless of this setting.
-
-**xino=on**
-Requires that all layers support `name_to_handle_at(2)`. If they do, inode
-numbers are derived from a hash of the file handle and remain stable across
-mounts.
-If any layer does not support `name_to_handle_at(2)`, the mount fails.
-As with other modes, when all layers are on the same device, the underlying
-inode number always takes precedence.
-
-**-o ino32_t**
-Forces all returned `st_ino` values to be truncated to 32 bits.
-
-This option exists solely for compatibility with older 32‑bit userspaces that
-cannot correctly handle 64‑bit inode numbers. It has no functional benefit on
-modern systems and should not be used unless required for legacy compatibility.
 
 # SEE ALSO
 
