@@ -22,6 +22,7 @@
 #define FUSE_USE_VERSION 32
 #define _FILE_OFFSET_BITS 64
 
+#include <android_compat.h>
 #include <config.h>
 
 #include "fuse-overlayfs.h"

@@ -28,7 +28,7 @@ Also, please note that, when using `fuse-overlayfs` **from a user namespace**
 (for example, when using rootless `podman`) a Linux Kernel > v4.18.0 is required.
 
 
-Static Build:
+Static Build (+ Compiling on termux)
 =======================================================
 
 This project provides a convenient way to automatically perform a static build using a container.
@@ -56,3 +56,35 @@ buildah bud -v $PWD:/build/fuse-overlayfs -t fuse-overlayfs -f ./Containerfile.s
 sudo cp fuse-overlayfs /usr/bin/
 ```
 
+6. Compiling on termux:
+
+Needed: git, make, llvm, clang, libfuse2, libfuse3, build-essential, autoconf, automake, m4 
+
+```
+apt install git make llvm clang libfuse2 libfuse3 build-essential autoconf automake m4 
+```
+
+Clone the repo and build:
+
+```
+git clone https://github.com/subhu2008/fuse-overlayfs.git
+cd fuse-overlayfs
+./autogen.sh
+./configure --prefix $PREFIX
+make -j$(nproc --all)
+```
+
+Confirm it compiled the fuse-overlayfs binary at dir $PREFIX/bin
+
+```
+fuse-overlayfs --version
+```
+
+Should get the output:
+
+```
+fuse-overlayfs: version 1.17-dev
+FUSE library version 3.16.2
+using FUSE kernel interface version 7.38
+fusermount3 version: 3.16.2
+```
