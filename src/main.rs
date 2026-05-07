@@ -209,11 +209,18 @@ fn main() {
 }
 
 fn set_limits() {
-    use nix::sys::resource::{Resource, getrlimit, setrlimit};
-    if let Ok((_, hard)) = getrlimit(Resource::RLIMIT_NOFILE)
-        && let Err(e) = setrlimit(Resource::RLIMIT_NOFILE, hard, hard)
-    {
-        eprintln!("fuse-overlayfs: cannot set nofile rlimit: {}", e);
+    use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+    let rlim = getrlimit(Resource::Nofile);
+    if let Some(hard) = rlim.maximum {
+        if let Err(e) = setrlimit(
+            Resource::Nofile,
+            Rlimit {
+                current: Some(hard),
+                maximum: Some(hard),
+            },
+        ) {
+            eprintln!("fuse-overlayfs: cannot set nofile rlimit: {}", e);
+        }
     }
 }
 
