@@ -25,9 +25,9 @@ impl fmt::Display for FsError {
 
 impl std::error::Error for FsError {}
 
-impl From<nix::errno::Errno> for FsError {
-    fn from(e: nix::errno::Errno) -> Self {
-        FsError(e as libc::c_int)
+impl From<rustix::io::Errno> for FsError {
+    fn from(e: rustix::io::Errno) -> Self {
+        FsError(e.raw_os_error())
     }
 }
 
