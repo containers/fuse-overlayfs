@@ -100,6 +100,12 @@ pub struct OverlayFs {
     notifier: Arc<OnceLock<fuser::Notifier>>,
 }
 
+/// Custom ioctl command: clear and re-scan a directory's cached children.
+/// Encoded as _IO('f', 0x66) — direction=none, size=0, type='f'(0x66), nr=0x66.
+/// Immediately rebuilds the directory listing, picking up externally created
+/// whiteout files and other changes.
+const FUSE_OVFS_IOC_REFRESH_DIR: libc::Ioctl = (b'f' as libc::Ioctl) << 8 | 0x66;
+
 struct OverlayInner {
     layers: Vec<OvlLayer>,
     inodes: InodeTable,
@@ -3652,6 +3658,36 @@ impl Filesystem for OverlayFs {
         let mut val: libc::c_long = 0;
         let is_set = cmd_ioctl == libc::FS_IOC_SETVERSION || cmd_ioctl == libc::FS_IOC_SETFLAGS;
         let is_get = cmd_ioctl == libc::FS_IOC_GETVERSION || cmd_ioctl == libc::FS_IOC_GETFLAGS;
+
+        // Custom command: clear and re-scan a directory's children.
+        if cmd_ioctl == FUSE_OVFS_IOC_REFRESH_DIR {
+            let node = match inner.node(&node_id) {
+                Ok(n) => n,
+                Err(e) => {
+                    reply.error(Errno::from_i32(e.0));
+                    return;
+                }
+            };
+            if !node.is_dir() {
+                reply.error(Errno::ENOTDIR);
+                return;
+            }
+            let path = inner.node_path(node_id);
+            let last_layer = match inner.nodes.get(&node_id) {
+                Some(n) => n.last_layer_idx,
+                None => {
+                    reply.error(Errno::ENOENT);
+                    return;
+                }
+            };
+            if let Some(node) = inner.nodes.get_mut(&node_id) {
+                node.clear_children();
+            }
+            inner.load_dir_impl(node_id, &path, Some(last_layer), &self.config);
+            debug!("ioctl invalidate: directory ino={}", ino);
+            reply.ioctl(0, &[]);
+            return;
+        }
 
         if !is_set && !is_get {
             reply.error(Errno::ENOSYS);

@@ -263,6 +263,20 @@ impl OvlNode {
             whiteouts.insert(name);
         }
     }
+
+    /// Clear all children and whiteouts. Used by cache invalidation to
+    /// force a full re-scan of the directory.
+    pub fn clear_children(&mut self) {
+        if let DirState::Dir {
+            children,
+            whiteouts,
+            ..
+        } = &mut self.dir_state
+        {
+            children.clear();
+            whiteouts.clear();
+        }
+    }
 }
 
 impl Drop for OvlNode {
