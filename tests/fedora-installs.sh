@@ -297,3 +297,23 @@ mv merged/base/test/test1 merged/base/test/tmp
 cp -r merged/base/test/tmp merged/base/test/test1
 
 umount merged
+
+# chmod on hardlinked lower-layer files must copy up the correct file.
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+
+mkdir -p lower/o lower/usr/lib lower/usr/share/x
+echo x > lower/o/orig
+ln lower/o/orig lower/usr/lib/link
+ln lower/o/orig lower/usr/share/x/l3
+chmod 664 lower/o/orig
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+ls merged/o/ merged/usr/lib/ merged/usr/share/x/ > /dev/null
+chmod go-w merged/usr/lib/link
+test "$(stat -c %a merged/usr/lib/link)" = "644"
+
+umount merged
+test -f upper/usr/lib/link
+test "$(stat -c %a upper/usr/lib/link)" = "644"

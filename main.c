@@ -193,6 +193,14 @@ get_timeout (struct ovl_data *lo)
   return lo->timeout;
 }
 
+static double
+get_entry_timeout (struct ovl_data *lo, struct ovl_node *node)
+{
+  if (node->ino && node->ino->underlying_hardlink)
+    return 0;
+  return lo->timeout;
+}
+
 static const struct fuse_opt ovl_opts[] = {
   { "redirect_dir=%s",
     offsetof (struct ovl_data, redirect_dir), 0 },
@@ -1309,10 +1317,38 @@ register_inode (struct ovl_data *lo, struct ovl_node *n, mode_t mode)
             }
         }
 
-      n->next_link = ino->node;
-      ino->node = n;
+      if (n->layer->low)
+        {
+          struct ovl_ino *new_ino;
+
+          ino->underlying_hardlink = true;
+
+          new_ino = calloc (1, sizeof (*new_ino));
+          if (new_ino == NULL)
+            return NULL;
+
+          new_ino->ino = n->tmp_ino;
+          new_ino->dev = n->tmp_dev;
+          new_ino->node = n;
+          new_ino->mode = mode;
+          new_ino->underlying_hardlink = true;
+          n->ino = new_ino;
+          n->next_link = NULL;
+
+          stats.inodes++;
+          return n;
+        }
+
+      {
+        struct ovl_node *last;
+        for (last = ino->node; last->next_link; last = last->next_link)
+          ;
+        last->next_link = n;
+      }
+      n->next_link = NULL;
       ino->mode = mode;
       n->ino = ino;
+
       return n;
     }
 
@@ -2173,13 +2209,7 @@ do_lookup_file (struct ovl_data *lo, fuse_ino_t parent, const char *name)
     pnode = inode_to_node (lo, parent);
 
   if (name == NULL)
-    {
-      /* Prefer a version that is loaded.  */
-      for (node = pnode; node; node = node->next_link)
-        if (node->parent)
-          return node;
-      return pnode;
-    }
+    return pnode;
 
   if (has_prefix (name, ".wh."))
     {
@@ -2339,7 +2369,7 @@ ovl_lookup (fuse_req_t req, fuse_ino_t parent, const char *name)
   e.ino = node_to_inode (node);
   node->ino->lookups++;
   e.attr_timeout = get_timeout (lo);
-  e.entry_timeout = get_timeout (lo);
+  e.entry_timeout = get_entry_timeout (lo, node);
   fuse_reply_entry (req, &e);
 }
 
@@ -2629,7 +2659,7 @@ ovl_do_readdir (fuse_req_t req, fuse_ino_t ino, size_t size,
             }
 
           e.attr_timeout = get_timeout (lo);
-          e.entry_timeout = get_timeout (lo);
+          e.entry_timeout = get_entry_timeout (lo, node);
           e.ino = node_to_inode (node);
           entsize = fuse_add_direntry_plus (req, p, remaining, name, &e, offset + 1);
           if (entsize <= remaining)

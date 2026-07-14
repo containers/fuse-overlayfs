@@ -35,6 +35,7 @@ struct ovl_ino
   dev_t dev;
   int lookups;
   mode_t mode;
+  bool underlying_hardlink;
 };
 
 struct ovl_node
