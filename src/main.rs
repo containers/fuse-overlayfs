@@ -123,8 +123,8 @@ fn main() {
             "workdir={}",
             config.workdir.as_deref().unwrap_or("NOT USED")
         );
-        debug!("lowerdir={}", &lowerdir);
-        debug!("mountpoint={}", &mountpoint);
+        debug!("lowerdir={}", lowerdir);
+        debug!("mountpoint={}", mountpoint);
         debug!("plugins={}", config.plugins.as_deref().unwrap_or("<none>"));
         debug!(
             "fsync={}",
@@ -185,7 +185,7 @@ fn main() {
     let fs = overlay::OverlayFs::new(config, layers, workdir_raw_fd, notifier_lock.clone());
 
     // Mount the filesystem (this creates the FUSE session and mounts)
-    info!("mounting on {} with {} threads", &mountpoint, n_threads);
+    info!("mounting on {} with {} threads", mountpoint, n_threads);
     let session = match fuser::Session::new(fs, std::path::Path::new(&mountpoint), &fuse_config) {
         Ok(s) => s,
         Err(e) => {
