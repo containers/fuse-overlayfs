@@ -170,15 +170,29 @@ pub fn file_exists_at(dirfd: RawFd, pathname: &[u8]) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
+
+    #[cfg(not(target_os = "android"))]
+    let at_eaccess = libc::AT_EACCESS;
+
+    #[cfg(target_os = "android")]
+    let at_eaccess = 0x200; // Fallback for Bionic
+
     let ret = unsafe {
         libc::faccessat(
             dirfd,
             c_path.as_ptr(),
             libc::F_OK,
-            libc::AT_SYMLINK_NOFOLLOW | libc::AT_EACCESS,
+            libc::AT_SYMLINK_NOFOLLOW | at_eaccess,
         )
     };
-    if ret < 0 && unsafe { *libc::__errno_location() } == libc::EINVAL {
+
+    #[cfg(not(target_os = "android"))]
+    let current_errno = unsafe { *libc::__errno_location() };
+
+    #[cfg(target_os = "android")]
+    let current_errno = unsafe { *libc::__errno() };
+
+    if ret < 0 && current_errno == libc::EINVAL {
         let mut buf: libc::stat = unsafe { std::mem::zeroed() };
         let ret =
             unsafe { libc::fstatat(dirfd, c_path.as_ptr(), &mut buf, libc::AT_SYMLINK_NOFOLLOW) };

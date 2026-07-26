@@ -13,8 +13,18 @@ pub fn statx_to_stat(stx: &libc::statx) -> libc::stat {
     st.st_gid = stx.stx_gid;
     st.st_rdev = libc::makedev(stx.stx_rdev_major, stx.stx_rdev_minor) as _;
     st.st_size = stx.stx_size as libc::off_t;
-    st.st_blksize = stx.stx_blksize as libc::blksize_t;
-    st.st_blocks = stx.stx_blocks as libc::blkcnt_t;
+    #[cfg(not(target_os = "android"))]
+    {
+        st.st_blksize = stx.stx_blksize as libc::blksize_t;
+        st.st_blocks = stx.stx_blocks as libc::blkcnt_t;
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        st.st_blksize = stx.stx_blksize as _;
+        st.st_blocks = stx.stx_blocks as _;
+    }
+
     st.st_atime = stx.stx_atime.tv_sec as _;
     st.st_atime_nsec = stx.stx_atime.tv_nsec as _;
     st.st_mtime = stx.stx_mtime.tv_sec as _;

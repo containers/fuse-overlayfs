@@ -2927,7 +2927,12 @@ impl Filesystem for OverlayFs {
         let encoded = match xattr::encode_xattr_name(name_str, layer.stat_override_mode()) {
             Some(n) => n,
             None => {
+                #[cfg(not(target_os = "android"))]
                 reply.error(Errno::ENODATA);
+
+                #[cfg(target_os = "android")]
+                reply.error(Errno::ENOENT); // For Android bionic
+
                 return;
             }
         };
@@ -3690,7 +3695,13 @@ impl Filesystem for OverlayFs {
             && fh != 0
             && let Some(f) = self.get_file(fh)
         {
-            if let Err(e) = crate::sys::io::ioctl_long(f.as_raw_fd(), cmd_ioctl, &mut val) {
+            #[cfg(not(target_os = "android"))]
+            let cmd = cmd_ioctl;
+
+            #[cfg(target_os = "android")]
+            let cmd = cmd_ioctl as libc::c_ulong;
+
+            if let Err(e) = crate::sys::io::ioctl_long(f.as_raw_fd(), cmd, &mut val) {
                 reply.error(Errno::from_i32(e.0));
             } else if out_size > 0 {
                 reply.ioctl(0, &val.to_ne_bytes());
@@ -3718,7 +3729,13 @@ impl Filesystem for OverlayFs {
             }
         };
 
-        if let Err(e) = crate::sys::io::ioctl_long(opened.as_raw_fd(), cmd_ioctl, &mut val) {
+        #[cfg(not(target_os = "android"))]
+        let cmd = cmd_ioctl;
+
+        #[cfg(target_os = "android")]
+        let cmd = cmd_ioctl as libc::c_ulong;
+
+        if let Err(e) = crate::sys::io::ioctl_long(opened.as_raw_fd(), cmd, &mut val) {
             reply.error(Errno::from_i32(e.0));
         } else if out_size > 0 {
             reply.ioctl(0, &val.to_ne_bytes());

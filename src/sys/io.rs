@@ -72,7 +72,11 @@ pub fn copy_file_range(
     off_out: &mut i64,
     len: usize,
 ) -> FsResult<usize> {
+    #[cfg(not(target_os = "android"))]
     let ret = unsafe { libc::copy_file_range(fd_in, off_in, fd_out, off_out, len, 0) };
+ 
+    #[cfg(target_os = "android")]
+    let ret: isize = unsafe { libc::syscall(libc::SYS_copy_file_range, fd_in, off_in, fd_out, off_out, len, 0) as _ };
     if ret < 0 {
         Err(FsError::last())
     } else {
@@ -133,7 +137,11 @@ pub fn ficlone(dest_fd: RawFd, src_fd: RawFd) -> FsResult<()> {
 /// Safe wrapper for ioctl with a c_long in/out parameter (e.g. FS_IOC_GETFLAGS/SETFLAGS).
 /// Returns the value on success; on failure returns FsError.
 pub fn ioctl_long(fd: RawFd, cmd: libc::c_ulong, val: &mut libc::c_long) -> FsResult<()> {
+    #[cfg(not(target_os = "android"))]
     let ret = unsafe { libc::ioctl(fd, cmd, val as *mut libc::c_long) };
+
+    #[cfg(target_os = "android")]
+    let ret = unsafe { libc::ioctl(fd, cmd as _, val as *mut libc::c_long) };
     if ret < 0 {
         Err(FsError::last())
     } else {

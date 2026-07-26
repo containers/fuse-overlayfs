@@ -73,7 +73,11 @@ pub fn statvfs(path: &CStr) -> FsResult<libc::statvfs> {
 
 pub fn statx(dirfd: RawFd, path: &CStr, flags: i32, mask: u32) -> FsResult<libc::statx> {
     let mut stx: libc::statx = unsafe { std::mem::zeroed() };
+    #[cfg(not(target_os = "android"))]
     let ret = unsafe { libc::statx(dirfd, path.as_ptr(), flags, mask, &mut stx) };
+
+    #[cfg(target_os = "android")]
+    let ret = unsafe { libc::syscall(libc::SYS_statx, dirfd, path.as_ptr(), flags, mask, &mut stx) as libc::c_int };
     if ret < 0 {
         Err(FsError::last())
     } else {
