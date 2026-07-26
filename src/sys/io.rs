@@ -74,9 +74,19 @@ pub fn copy_file_range(
 ) -> FsResult<usize> {
     #[cfg(not(target_os = "android"))]
     let ret = unsafe { libc::copy_file_range(fd_in, off_in, fd_out, off_out, len, 0) };
- 
+
     #[cfg(target_os = "android")]
-    let ret: isize = unsafe { libc::syscall(libc::SYS_copy_file_range, fd_in, off_in, fd_out, off_out, len, 0) as _ };
+    let ret: isize = unsafe {
+        libc::syscall(
+            libc::SYS_copy_file_range,
+            fd_in,
+            off_in,
+            fd_out,
+            off_out,
+            len,
+            0,
+        ) as _
+    };
     if ret < 0 {
         Err(FsError::last())
     } else {

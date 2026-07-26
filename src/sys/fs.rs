@@ -77,7 +77,9 @@ pub fn statx(dirfd: RawFd, path: &CStr, flags: i32, mask: u32) -> FsResult<libc:
     let ret = unsafe { libc::statx(dirfd, path.as_ptr(), flags, mask, &mut stx) };
 
     #[cfg(target_os = "android")]
-    let ret = unsafe { libc::syscall(libc::SYS_statx, dirfd, path.as_ptr(), flags, mask, &mut stx) as libc::c_int };
+    let ret = unsafe {
+        libc::syscall(libc::SYS_statx, dirfd, path.as_ptr(), flags, mask, &mut stx) as libc::c_int
+    };
     if ret < 0 {
         Err(FsError::last())
     } else {
