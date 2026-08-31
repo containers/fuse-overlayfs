@@ -37,5 +37,6 @@ pub fn statx_to_stat(stx: &libc::statx) -> libc::stat {
 // statx mask constants (also defined in libc but re-exported for convenience)
 pub const STATX_TYPE: libc::c_uint = 0x0000_0001;
 pub const STATX_MODE: libc::c_uint = 0x0000_0002;
+pub const STATX_NLINK: libc::c_uint = 0x0000_0004;
 pub const STATX_INO: libc::c_uint = 0x0000_0100;
 pub const STATX_BASIC_STATS: libc::c_uint = 0x0000_07ff;

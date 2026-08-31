@@ -68,8 +68,16 @@ jobs:
     - name: Install binary
       run: |
         chmod +x fuse-overlayfs
+        # Install over every location that may already ship a fuse-overlayfs on
+        # the runner image.  In particular /usr/local/bin precedes /usr/bin in
+        # root's secure_path, so a stale pre-installed binary there would shadow
+        # the freshly-built one and the tests would silently run the wrong code.
+        sudo cp fuse-overlayfs /usr/local/bin/fuse-overlayfs
         sudo cp fuse-overlayfs /usr/bin/fuse-overlayfs
         sudo cp fuse-overlayfs /sbin/fuse-overlayfs
+        # Sanity-check that the binary the tests will pick up is really ours.
+        sudo -i command -v fuse-overlayfs
+        command -v fuse-overlayfs
 
     - name: Install dependencies
       run: |

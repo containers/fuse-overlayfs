@@ -111,6 +111,10 @@ pub struct OvlIno {
     pub mode: u32,
     /// The FUSE inode number assigned to this entry.
     pub fuse_ino: u64,
+    /// True if this inode represents a lower-layer hardlink that was broken
+    /// apart so each path gets its own FUSE inode.  Entry timeout is forced
+    /// to zero so the kernel re-LOOKUPs and discovers the independent inode.
+    pub underlying_hardlink: bool,
 }
 
 /// Represents a single named entry in the overlay directory tree.
@@ -127,6 +131,9 @@ pub struct OvlNode {
     pub tmp_ino: u64,
     /// Device number from the underlying filesystem.
     pub tmp_dev: u64,
+    /// Link count from the underlying filesystem.  Used to detect lower-layer
+    /// hardlinks at registration time so each alias gets its own FUSE inode.
+    pub tmp_nlink: u64,
     /// The entry name (basename). Full path is computed on-demand via compute_path().
     pub name: Vec<u8>,
     /// When a node is hidden (moved to workdir for deferred deletion),
@@ -171,6 +178,7 @@ impl OvlNode {
             last_layer_idx: layer_idx,
             tmp_ino: ino,
             tmp_dev: dev,
+            tmp_nlink: 1,
             name,
             hidden_path: None,
             hidden_dirfd: -1,
@@ -303,6 +311,8 @@ pub struct InodeTable {
     table: FxHashMap<InodeKey, Box<OvlIno>>,
     /// Reverse map from FUSE inode number to InodeKey.
     fuse_map: FxHashMap<u64, InodeKey>,
+    /// Reverse map from NodeId to InodeKey (for broken hardlinks).
+    node_map: FxHashMap<NodeId, InodeKey>,
     /// Whether all layers are on the same device.
     same_device: bool,
     /// Fallback counter for collision resolution.
@@ -315,6 +325,7 @@ impl InodeTable {
         InodeTable {
             table: FxHashMap::default(),
             fuse_map: FxHashMap::default(),
+            node_map: FxHashMap::default(),
             same_device: true,
             next_fallback: 0x8000_0000_0000_0000,
         }
@@ -337,7 +348,7 @@ impl InodeTable {
 
     /// Register a node in the inode table. If an inode with the same (ino, dev)
     /// already exists, the node is linked to it (hardlink tracking).
-    /// Returns the FUSE inode number.
+    /// Returns the FUSE inode number and the InodeKey to use for inc_lookup.
     pub fn register(
         &mut self,
         arena: &NodeArena,
@@ -345,8 +356,39 @@ impl InodeTable {
         ino: u64,
         dev: u64,
         mode: u32,
-    ) -> Option<u64> {
+        is_lower: bool,
+    ) -> Option<(u64, InodeKey)> {
+        if let Some(existing_key) = self.node_map.get(&node_id) {
+            if let Some(existing_ino) = self.table.get(existing_key) {
+                return Some((existing_ino.fuse_ino, *existing_key));
+            }
+        }
+
         let key = InodeKey { ino, dev };
+
+        // Break lower-layer hardlinks eagerly.  A lower-layer non-directory with
+        // more than one link may be reachable under several paths in the merged
+        // tree.  If such aliases shared a FUSE inode we could not tell which path
+        // a copy-up/chmod targets, and using the raw inode number as the FUSE
+        // inode is unsafe: it is non-deterministic which alias registers first
+        // (concurrent readdirplus), and once that node is forgotten the raw
+        // number can be reused for a different alias, so the kernel's cached
+        // path->inode mapping would resolve to the wrong file.  Giving every
+        // lower hardlink alias its own stable, never-reused FUSE inode (as the C
+        // implementation does via per-node inode identity) avoids all of this.
+        let is_dir_mode = (mode & libc::S_IFMT) == libc::S_IFDIR;
+        if is_lower && !is_dir_mode {
+            let nlink = arena.get(&node_id).map(|n| n.tmp_nlink).unwrap_or(1);
+            if nlink > 1 {
+                if let Some(existing_ino) = self.table.get_mut(&key) {
+                    existing_ino.nodes.retain(|id| arena.contains_key(id));
+                    if !existing_ino.nodes.is_empty() {
+                        existing_ino.underlying_hardlink = true;
+                    }
+                }
+                return self.register_broken_hardlink(node_id, key, mode);
+            }
+        }
 
         if let Some(existing_ino) = self.table.get_mut(&key) {
             // Prune dead nodes (removed from arena but not yet forgotten)
@@ -359,14 +401,19 @@ impl InodeTable {
                     if let Some(existing_node) = arena.get(&existing_id)
                         && (existing_node.is_dir() || compute_path(arena, existing_id) == new_path)
                     {
-                        return Some(existing_ino.fuse_ino);
+                        return Some((existing_ino.fuse_ino, key));
                     }
                 }
 
-                // New hardlink to the same physical inode
+                if is_lower {
+                    existing_ino.underlying_hardlink = true;
+                    return self.register_broken_hardlink(node_id, key, mode);
+                }
+
+                // New hardlink to the same physical inode (upper layer)
                 existing_ino.nodes.insert(node_id);
                 existing_ino.mode = mode;
-                return Some(existing_ino.fuse_ino);
+                return Some((existing_ino.fuse_ino, key));
             }
 
             // All nodes are dead: the filesystem recycled this inode number.
@@ -397,17 +444,92 @@ impl InodeTable {
             lookups: std::sync::atomic::AtomicI64::new(0),
             mode,
             fuse_ino,
+            underlying_hardlink: false,
         });
 
         STAT_INODES.fetch_add(1, Ordering::Relaxed);
         self.fuse_map.insert(fuse_ino, key);
         self.table.insert(key, ino_entry);
-        Some(fuse_ino)
+        Some((fuse_ino, key))
+    }
+
+    /// Allocate a separate OvlIno for a lower-layer hardlink so it gets
+    /// its own FUSE inode.  Mirrors kernel overlayfs which breaks hardlinks
+    /// on copy-up.
+    fn register_broken_hardlink(
+        &mut self,
+        node_id: NodeId,
+        _real_key: InodeKey,
+        mode: u32,
+    ) -> Option<(u64, InodeKey)> {
+        // Always allocate from the monotonic fallback counter, never from the
+        // raw inode number.  The raw number is shared by every hardlink alias
+        // and is recyclable once forgotten; using it here would let a freed
+        // number be handed to a different alias, so the kernel's cached
+        // path->inode mapping could resolve to the wrong file.  Fallback values
+        // are effectively never reused, giving each alias a stable identity.
+        let mut fuse_ino = self.next_fallback;
+        self.next_fallback = self.next_fallback.wrapping_add(1);
+        if self.next_fallback <= 1 {
+            self.next_fallback = 2;
+        }
+        while self.fuse_map.contains_key(&fuse_ino) || fuse_ino <= 1 {
+            fuse_ino = self.next_fallback;
+            self.next_fallback = self.next_fallback.wrapping_add(1);
+            if self.next_fallback <= 1 {
+                self.next_fallback = 2;
+            }
+        }
+        let synthetic_key = InodeKey {
+            ino: fuse_ino,
+            dev: u64::MAX,
+        };
+        let ino_entry = Box::new(OvlIno {
+            nodes: FxHashSet::from_iter([node_id]),
+            lookups: std::sync::atomic::AtomicI64::new(0),
+            mode,
+            fuse_ino,
+            underlying_hardlink: true,
+        });
+        STAT_INODES.fetch_add(1, Ordering::Relaxed);
+        self.fuse_map.insert(fuse_ino, synthetic_key);
+        self.node_map.insert(node_id, synthetic_key);
+        self.table.insert(synthetic_key, ino_entry);
+        Some((fuse_ino, synthetic_key))
+    }
+
+    /// Check whether a FUSE inode is a broken-out lower-layer hardlink.
+    pub fn is_underlying_hardlink(&self, fuse_ino: u64) -> bool {
+        self.fuse_to_ino(fuse_ino)
+            .map(|ino| ino.underlying_hardlink)
+            .unwrap_or(false)
     }
 
     /// Get the FUSE inode for a given InodeKey (if registered).
     pub fn key_to_fuse_ino(&self, key: &InodeKey) -> Option<u64> {
         self.table.get(key).map(|ino| ino.fuse_ino)
+    }
+
+    /// Check if a node is already registered (via natural key or node_map)
+    /// and return (fuse_ino, key) if so.  Used by the lookup fast path.
+    pub fn lookup_registered(
+        &self,
+        node_id: NodeId,
+        ino: u64,
+        dev: u64,
+    ) -> Option<(u64, InodeKey)> {
+        if let Some(key) = self.node_map.get(&node_id) {
+            if let Some(ovl_ino) = self.table.get(key) {
+                return Some((ovl_ino.fuse_ino, *key));
+            }
+        }
+        let key = InodeKey { ino, dev };
+        let ovl_ino = self.table.get(&key)?;
+        if ovl_ino.nodes.contains(&node_id) {
+            Some((ovl_ino.fuse_ino, key))
+        } else {
+            None
+        }
     }
 
     /// Remove a NodeId from the inode entry's node list (e.g., when a hardlink is deleted).
@@ -445,6 +567,9 @@ impl InodeTable {
             }
             let prev = ino.lookups.fetch_sub(nlookup as i64, Ordering::Relaxed);
             if prev - nlookup as i64 <= 0 {
+                for nid in &ino.nodes {
+                    self.node_map.remove(nid);
+                }
                 STAT_INODES.fetch_sub(1, Ordering::Relaxed);
                 self.fuse_map.remove(&fuse_ino);
                 self.table.remove(&key);
@@ -549,7 +674,9 @@ mod tests {
         let mut arena = NodeArena::new();
         let node = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
         let node_id = arena.insert(node);
-        let fuse_ino = table.register(&arena, node_id, 100, 1, 0o100644).unwrap();
+        let (fuse_ino, _key) = table
+            .register(&arena, node_id, 100, 1, 0o100644, false)
+            .unwrap();
         assert_eq!(fuse_ino, 100);
     }
 
@@ -559,26 +686,217 @@ mod tests {
         let mut arena = NodeArena::new();
         let node = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
         let node_id = arena.insert(node);
-        let fuse_ino = table.register(&arena, node_id, 100, 1, 0o100644).unwrap();
+        let (fuse_ino, _key) = table
+            .register(&arena, node_id, 100, 1, 0o100644, false)
+            .unwrap();
 
         table.inc_lookup(&InodeKey { ino: 100, dev: 1 });
         assert!(table.forget(fuse_ino, 1));
     }
 
     #[test]
-    fn test_inode_table_hardlink() {
+    fn test_inode_table_hardlink_upper() {
         let mut table = InodeTable::new();
         let mut arena = NodeArena::new();
 
         let node1 = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
         let id1 = arena.insert(node1);
-        let fuse1 = table.register(&arena, id1, 100, 1, 0o100644).unwrap();
+        let (fuse1, _) = table
+            .register(&arena, id1, 100, 1, 0o100644, false)
+            .unwrap();
 
         let node2 = OvlNode::new(b"b".to_vec(), 0, 100, 1, false);
         let id2 = arena.insert(node2);
-        let fuse2 = table.register(&arena, id2, 100, 1, 0o100644).unwrap();
+        let (fuse2, _) = table
+            .register(&arena, id2, 100, 1, 0o100644, false)
+            .unwrap();
 
         assert_eq!(fuse1, fuse2);
+    }
+
+    #[test]
+    fn test_inode_table_hardlink_lower_broken() {
+        let mut table = InodeTable::new();
+        let mut arena = NodeArena::new();
+
+        let parent = OvlNode::new(b"root".to_vec(), 0, 1, 1, true);
+        let parent_id = arena.insert(parent);
+
+        let mut node1 = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
+        node1.parent = Some(parent_id);
+        let id1 = arena.insert(node1);
+        let (fuse1, _) = table.register(&arena, id1, 100, 1, 0o100644, true).unwrap();
+
+        let mut node2 = OvlNode::new(b"b".to_vec(), 0, 100, 1, false);
+        node2.parent = Some(parent_id);
+        let id2 = arena.insert(node2);
+        let (fuse2, _) = table.register(&arena, id2, 100, 1, 0o100644, true).unwrap();
+
+        assert_ne!(fuse1, fuse2);
+        assert!(table.is_underlying_hardlink(fuse1));
+        assert!(table.is_underlying_hardlink(fuse2));
+    }
+
+    // A lower-layer file with nlink > 1 must be broken out into its own FUSE
+    // inode on the very first registration, so the raw inode number is never
+    // used (nor later reused) as a FUSE inode for a hardlink alias.
+    #[test]
+    fn test_inode_table_lower_hardlink_broken_eagerly() {
+        let mut table = InodeTable::new();
+        let mut arena = NodeArena::new();
+
+        let mut node = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
+        node.tmp_nlink = 2;
+        let id = arena.insert(node);
+        let (fuse, _) = table.register(&arena, id, 100, 1, 0o100644, true).unwrap();
+
+        // Not the raw inode number, and flagged as a broken hardlink.
+        assert_ne!(fuse, 100);
+        assert!(table.is_underlying_hardlink(fuse));
+
+        // Re-registering the same node is idempotent (stable per-node inode).
+        let (fuse2, _) = table.register(&arena, id, 100, 1, 0o100644, true).unwrap();
+        assert_eq!(fuse, fuse2);
+    }
+
+    // A lower-layer file with a single link keeps the raw inode number as its
+    // FUSE inode (passthrough / ino stability preserved).
+    #[test]
+    fn test_inode_table_lower_single_link_natural() {
+        let mut table = InodeTable::new();
+        let mut arena = NodeArena::new();
+
+        let mut node = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
+        node.tmp_nlink = 1;
+        let id = arena.insert(node);
+        let (fuse, _) = table.register(&arena, id, 100, 1, 0o100644, true).unwrap();
+
+        assert_eq!(fuse, 100);
+        assert!(!table.is_underlying_hardlink(fuse));
+    }
+
+    // Helper: resolve a fuse_ino to a node the way overlay::lookup_node_id does.
+    fn resolve(table: &InodeTable, arena: &NodeArena, fuse_ino: u64) -> Option<NodeId> {
+        let ovl = table.fuse_to_ino(fuse_ino)?;
+        ovl.nodes.iter().copied().find(|id| arena.contains_key(id))
+    }
+
+    // Build the test-11 tree: three lower hardlinks o/orig, usr/lib/link,
+    // usr/share/x/l3, all sharing (ino=500, dev=9). Returns their NodeIds.
+    fn build_tree(arena: &mut NodeArena) -> (NodeId, NodeId, NodeId) {
+        let root = OvlNode::new(b"".to_vec(), 1, 1, 9, true);
+        let root_id = arena.insert(root);
+        let mk_dir = |arena: &mut NodeArena, name: &[u8], ino: u64, parent: NodeId| {
+            let mut d = OvlNode::new(name.to_vec(), 1, ino, 9, true);
+            d.parent = Some(parent);
+            let id = arena.insert(d);
+            arena
+                .get_mut(&parent)
+                .unwrap()
+                .insert_child(name.to_vec(), id);
+            id
+        };
+        let mk_file = |arena: &mut NodeArena, name: &[u8], parent: NodeId| {
+            let mut f = OvlNode::new(name.to_vec(), 1, 500, 9, false);
+            f.parent = Some(parent);
+            // Three hardlinks share inode 500 in the lower layer.
+            f.tmp_nlink = 3;
+            let id = arena.insert(f);
+            arena
+                .get_mut(&parent)
+                .unwrap()
+                .insert_child(name.to_vec(), id);
+            id
+        };
+        let o = mk_dir(arena, b"o", 10, root_id);
+        let usr = mk_dir(arena, b"usr", 11, root_id);
+        let lib = mk_dir(arena, b"lib", 12, usr);
+        let share = mk_dir(arena, b"share", 13, usr);
+        let x = mk_dir(arena, b"x", 14, share);
+        let orig = mk_file(arena, b"orig", o);
+        let link = mk_file(arena, b"link", lib);
+        let l3 = mk_file(arena, b"l3", x);
+        (orig, link, l3)
+    }
+
+    // Register a lower hardlink the way lookup/readdirplus does and inc its lookup.
+    fn reg(table: &mut InodeTable, arena: &NodeArena, id: NodeId) -> u64 {
+        let (fuse, key) = table.register(arena, id, 500, 9, 0o100664, true).unwrap();
+        table.inc_lookup(&key);
+        fuse
+    }
+
+    // Every alias must resolve back to its own node, no matter the order of
+    // registration and forget cycles.  This mirrors test-11 in test-hardlinks.sh.
+    #[test]
+    fn test_lower_hardlink_alias_resolution_all_orders() {
+        let orders: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        for order in orders {
+            let mut table = InodeTable::new();
+            let mut arena = NodeArena::new();
+            let (orig, link, l3) = build_tree(&mut arena);
+            let nodes = [orig, link, l3];
+            let paths = [
+                b"o/orig".to_vec(),
+                b"usr/lib/link".to_vec(),
+                b"usr/share/x/l3".to_vec(),
+            ];
+
+            // Register all three in this order (simulates readdirplus of dirs).
+            let mut fuse = [0u64; 3];
+            for &i in &order {
+                fuse[i] = reg(&mut table, &arena, nodes[i]);
+            }
+
+            // Each alias's fuse_ino must resolve to the correct node/path.
+            for i in 0..3 {
+                let resolved = resolve(&table, &arena, fuse[i]).expect("resolves");
+                assert_eq!(
+                    compute_path(&arena, resolved),
+                    paths[i],
+                    "order {:?}: alias {} (fuse {:#x}) resolved to wrong node",
+                    order,
+                    i,
+                    fuse[i]
+                );
+            }
+        }
+    }
+
+    // Simulate the kernel forgetting the broken aliases (entry_timeout=0) and
+    // then re-looking-up "link" at chmod time.  It must still resolve to link.
+    #[test]
+    fn test_lower_hardlink_forget_then_relookup() {
+        let mut table = InodeTable::new();
+        let mut arena = NodeArena::new();
+        let (orig, link, l3) = build_tree(&mut arena);
+
+        // readdirplus registers all three; every lower hardlink is broken out
+        // into its own FUSE inode, so none of them shares the raw inode number.
+        let f_orig = reg(&mut table, &arena, orig);
+        let f_link = reg(&mut table, &arena, link);
+        let f_l3 = reg(&mut table, &arena, l3);
+
+        // Broken aliases have entry_timeout 0 -> kernel forgets them.
+        assert!(table.is_underlying_hardlink(f_link));
+        assert!(table.is_underlying_hardlink(f_l3));
+        table.forget(f_link, 1);
+        table.forget(f_l3, 1);
+
+        // chmod re-looks-up "link".
+        let f_link2 = reg(&mut table, &arena, link);
+        let resolved = resolve(&table, &arena, f_link2).expect("resolves");
+        assert_eq!(compute_path(&arena, resolved), b"usr/lib/link");
+        // And orig must still resolve to orig.
+        let r_orig = resolve(&table, &arena, f_orig).expect("resolves");
+        assert_eq!(compute_path(&arena, r_orig), b"o/orig");
     }
 
     #[test]
@@ -588,7 +906,9 @@ mod tests {
         for ino in [100, 200, 40000000, 40000001] {
             let node = OvlNode::new(format!("f{}", ino).into_bytes(), 0, ino, 1, false);
             let node_id = arena.insert(node);
-            let fuse_ino = table.register(&arena, node_id, ino, 1, 0o100644).unwrap();
+            let (fuse_ino, _key) = table
+                .register(&arena, node_id, ino, 1, 0o100644, false)
+                .unwrap();
             assert_eq!(fuse_ino, ino);
         }
     }
@@ -601,11 +921,15 @@ mod tests {
 
         let node1 = OvlNode::new(b"a".to_vec(), 0, 100, 1, false);
         let id1 = arena.insert(node1);
-        let fuse1 = table.register(&arena, id1, 100, 1, 0o100644).unwrap();
+        let (fuse1, _) = table
+            .register(&arena, id1, 100, 1, 0o100644, false)
+            .unwrap();
 
         let node2 = OvlNode::new(b"b".to_vec(), 0, 100, 2, false);
         let id2 = arena.insert(node2);
-        let fuse2 = table.register(&arena, id2, 100, 2, 0o100644).unwrap();
+        let (fuse2, _) = table
+            .register(&arena, id2, 100, 2, 0o100644, false)
+            .unwrap();
 
         assert_ne!(fuse1, fuse2);
     }
@@ -857,10 +1181,12 @@ mod tests {
             .unwrap()
             .insert_child(b"perl5.36.0".to_vec(), perl536_id);
 
-        // Register both — they share the same (ino, dev) = (100, 1)
-        let fuse1 = table.register(&arena, perl_id, 100, 1, 0o100755).unwrap();
-        let fuse2 = table
-            .register(&arena, perl536_id, 100, 1, 0o100755)
+        // Register both on upper layer — they share the same (ino, dev) = (100, 1)
+        let (fuse1, _) = table
+            .register(&arena, perl_id, 100, 1, 0o100755, false)
+            .unwrap();
+        let (fuse2, _) = table
+            .register(&arena, perl536_id, 100, 1, 0o100755, false)
             .unwrap();
         assert_eq!(fuse1, fuse2, "hardlinks must share the same FUSE inode");
 

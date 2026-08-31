@@ -19,7 +19,7 @@ mkdir lower:1 upper:2 workdir:3 merged
 
 fuse-overlayfs -o 'sync=0,lowerdir=lower\\:1,upperdir=upper\\:2,workdir=workdir\\:3,suid,dev' merged
 
-$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged fedora dnf --use-host-config --installroot /merged --releasever 41 install -y glibc-common gedit
+$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged quay.io/fedora/fedora dnf --use-host-config --installroot /merged --releasever 44 install -y glibc-common gedit
 
 umount merged
 
@@ -29,6 +29,11 @@ mv upper:2 lower
 mkdir upper workdir
 
 gcc -static -o suid-test $(dirname $0)/suid-test.c
+
+printf "truncate through open\n" > lower/killpriv-open-trunc
+printf "truncate through setattr\n" > lower/killpriv-setattr-trunc
+printf "clear on write\n" > lower/killpriv-write
+chmod 6777 lower/killpriv-open-trunc lower/killpriv-setattr-trunc lower/killpriv-write
 
 fuse-overlayfs -o sync=0,threaded=1,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
 SUID_TEST=$(pwd)/suid-test
@@ -42,15 +47,30 @@ test $(stat -c %h merged/usr) -gt 2
 stat -c %A upper/suid | grep s
 stat -c %a upper/nosuid | grep -v s
 
-# Install some big packages
-$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged fedora dnf --use-host-config --installroot /merged --releasever 41 install -y emacs texlive
+# Test SUID/SGID clearing on truncate (CVE-2026-52791)
+: > merged/killpriv-open-trunc
+truncate -s 0 merged/killpriv-setattr-trunc
+test $(stat -c %s merged/killpriv-open-trunc) -eq 0
+test $(stat -c %s merged/killpriv-setattr-trunc) -eq 0
+test $(stat -c %a upper/killpriv-open-trunc) = 777
+test $(stat -c %a upper/killpriv-setattr-trunc) = 777
+test $(stat -c %a merged/killpriv-open-trunc) = 777
+test $(stat -c %a merged/killpriv-setattr-trunc) = 777
 
-$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged fedora sh -c 'rm /merged/usr/share/glib-2.0/schemas/gschemas.compiled; glib-compile-schemas /merged/usr/share/glib-2.0/schemas/'
+# Test SUID/SGID clearing on write
+dd if=/dev/zero of=merged/killpriv-write bs=1 count=1 conv=notrunc 2>/dev/null
+test $(stat -c %a upper/killpriv-write) = 777
+test $(stat -c %a merged/killpriv-write) = 777
+
+# Install some big packages
+$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged quay.io/fedora/fedora dnf --use-host-config --installroot /merged --releasever 44 install -y emacs texlive
+
+$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged quay.io/fedora/fedora sh -c 'rm /merged/usr/share/glib-2.0/schemas/gschemas.compiled; glib-compile-schemas /merged/usr/share/glib-2.0/schemas/'
 
 umount merged
 fuse-overlayfs -o sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
 
-$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged fedora sh -c 'rm -rf /merged/usr/share/glib-2.0/'
+$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged quay.io/fedora/fedora sh -c 'rm -rf /merged/usr/share/glib-2.0/'
 
 tar -c --to-stdout $(pwd)/merged > /dev/null
 
@@ -61,7 +81,7 @@ mkdir upper workdir lower
 # fast_ino_check
 fuse-overlayfs -o fast_ino_check=1,sync=0,lowerdir=lower,upperdir=upper,workdir=workdir,suid,dev merged
 
-$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged fedora dnf --use-host-config --installroot /merged --releasever 41 install -y glibc-common gedit
+$CONTAINER_RUNTIME run --rm -v $(pwd)/merged:/merged quay.io/fedora/fedora dnf --use-host-config --installroot /merged --releasever 44 install -y glibc-common gedit
 
 mkdir merged/a-directory
 
@@ -286,3 +306,23 @@ mv merged/base/test/test1 merged/base/test/tmp
 cp -r merged/base/test/tmp merged/base/test/test1
 
 umount merged
+
+# chmod on hardlinked lower-layer files must copy up the correct file.
+rm -rf lower upper workdir merged
+mkdir lower upper workdir merged
+
+mkdir -p lower/o lower/usr/lib lower/usr/share/x
+echo x > lower/o/orig
+ln lower/o/orig lower/usr/lib/link
+ln lower/o/orig lower/usr/share/x/l3
+chmod 664 lower/o/orig
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+ls merged/o/ merged/usr/lib/ merged/usr/share/x/ > /dev/null
+chmod go-w merged/usr/lib/link
+test "$(stat -c %a merged/usr/lib/link)" = "644"
+
+umount merged
+test -f upper/usr/lib/link
+test "$(stat -c %a upper/usr/lib/link)" = "644"

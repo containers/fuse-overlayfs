@@ -78,6 +78,16 @@ fn empty_upper_dir(upper: &OvlLayer, path: &[u8]) -> FsResult<()> {
     Ok(())
 }
 
+/// Clear SUID/SGID bits on a file descriptor after a content-modifying operation.
+fn clear_suid_sgid(fd: RawFd) -> FsResult<()> {
+    let st = crate::sys::fs::fstat(fd)?;
+    if st.st_mode & (libc::S_ISUID | libc::S_ISGID) != 0 {
+        let new_mode = st.st_mode & !(libc::S_ISUID | libc::S_ISGID);
+        crate::sys::fs::fchmod(fd, new_mode)?;
+    }
+    Ok(())
+}
+
 /// The main overlay filesystem state.
 pub struct OverlayFs {
     config: OverlayConfig,
@@ -590,13 +600,16 @@ impl OverlayInner {
         if ino == u64::from(INodeNo::ROOT) {
             return Some(self.root_id);
         }
-        // Find first live NodeId (skip removed hardlink nodes)
+        // Pick the lowest live NodeId (skip removed hardlink nodes).  Using the
+        // minimum rather than the hash-set iteration order makes resolution
+        // deterministic when several nodes share one inode (upper hardlinks).
         let ovl_ino = self.inodes.fuse_to_ino(ino)?;
         ovl_ino
             .nodes
             .iter()
             .copied()
-            .find(|id| self.nodes.contains_key(id))
+            .filter(|id| self.nodes.contains_key(id))
+            .min_by_key(|id| id.0)
     }
 
     /// Stat a node using a pre-computed path.
@@ -886,22 +899,31 @@ impl OverlayInner {
                 let is_dir = entry.dtype == libc::DT_DIR;
                 let node_path = Self::child_path(path, &entry.name);
 
-                let (ino, dev, mode) = if config.fast_ino_check {
-                    (entry.ino, 0, if is_dir { libc::S_IFDIR } else { 0 })
+                let (ino, dev, mode, nlink) = if config.fast_ino_check {
+                    (entry.ino, 0, if is_dir { libc::S_IFDIR } else { 0 }, 1)
                 } else {
                     match self.layers[layer_idx].ds.statat(
                         &node_path,
                         libc::AT_SYMLINK_NOFOLLOW,
-                        sstatx::STATX_TYPE | sstatx::STATX_MODE | sstatx::STATX_INO,
+                        sstatx::STATX_TYPE
+                            | sstatx::STATX_MODE
+                            | sstatx::STATX_NLINK
+                            | sstatx::STATX_INO,
                     ) {
-                        Ok(st) => (st.st_ino as u64, st.st_dev as u64, st.st_mode),
-                        Err(_) => (entry.ino, 0, if is_dir { libc::S_IFDIR } else { 0 }),
+                        Ok(st) => (
+                            st.st_ino as u64,
+                            st.st_dev as u64,
+                            st.st_mode,
+                            st.st_nlink as u64,
+                        ),
+                        Err(_) => (entry.ino, 0, if is_dir { libc::S_IFDIR } else { 0 }, 1),
                     }
                 };
 
                 let actual_is_dir = (mode & libc::S_IFMT) == libc::S_IFDIR || is_dir;
                 let mut child = OvlNode::new(entry.name, layer_idx, ino, dev, actual_is_dir);
                 child.mode = mode;
+                child.tmp_nlink = nlink;
                 child.last_layer_idx = layer_idx;
                 child.parent = Some(parent_id);
                 self.insert_child_node(parent_id, child);
@@ -986,7 +1008,7 @@ impl OverlayInner {
             let stat_result = self.layers[layer_idx].ds.statat(
                 &path,
                 libc::AT_SYMLINK_NOFOLLOW,
-                sstatx::STATX_TYPE | sstatx::STATX_MODE | sstatx::STATX_INO,
+                sstatx::STATX_TYPE | sstatx::STATX_MODE | sstatx::STATX_NLINK | sstatx::STATX_INO,
             );
 
             match stat_result {
@@ -1008,6 +1030,7 @@ impl OverlayInner {
                     if let Some(ref mut existing) = found_node {
                         existing.tmp_ino = st.st_ino as u64;
                         existing.tmp_dev = st.st_dev as u64;
+                        existing.tmp_nlink = st.st_nlink as u64;
                         existing.last_layer_idx = layer_idx;
                         continue;
                     }
@@ -1042,6 +1065,7 @@ impl OverlayInner {
                         is_dir,
                     );
                     child.mode = st.st_mode;
+                    child.tmp_nlink = st.st_nlink as u64;
                     child.last_layer_idx = layer_idx;
                     child.parent = Some(parent_id);
 
@@ -1068,12 +1092,13 @@ impl OverlayInner {
             let tmp_ino = child.tmp_ino;
             let tmp_dev = child.tmp_dev;
             let mode = child.mode;
+            let is_lower = self.layers[child.layer_idx].low;
 
             let child_id = self.nodes.insert(child);
 
             if tmp_ino != 0 {
                 self.inodes
-                    .register(&self.nodes, child_id, tmp_ino, tmp_dev, mode);
+                    .register(&self.nodes, child_id, tmp_ino, tmp_dev, mode, is_lower);
             }
 
             self.nodes
@@ -1338,22 +1363,20 @@ impl OverlayInner {
         let mut child = OvlNode::new(name.to_vec(), 0, st.st_ino as u64, st.st_dev as u64, is_dir);
         child.parent = Some(parent_id);
         child.mode = st.st_mode;
+        child.tmp_nlink = st.st_nlink as u64;
         if is_dir {
             child.mark_loaded();
         }
 
         let child_id = self.nodes.insert(child);
-        let fuse_ino = self.inodes.register(
+        let (fuse_ino, key) = self.inodes.register(
             &self.nodes,
             child_id,
             st.st_ino as u64,
             st.st_dev as u64,
             st.st_mode,
+            false,
         )?;
-        let key = InodeKey {
-            ino: st.st_ino as u64,
-            dev: st.st_dev as u64,
-        };
         self.inodes.inc_lookup(&key);
 
         self.nodes
@@ -1468,30 +1491,23 @@ impl Filesystem for OverlayFs {
                         return;
                     }
                 };
-                let key = InodeKey {
-                    ino: node.tmp_ino,
-                    dev: node.tmp_dev,
-                };
-                if let Some(fuse_ino) = inner.inodes.key_to_fuse_ino(&key) {
-                    // Ensure this node is registered in the inode table's node set.
-                    // Nodes loaded by readdir/readdirplus are in the tree but not
-                    // registered; fall through to the slow path to register them
-                    // so hardlink tracking works correctly.
-                    let node_registered = inner
+                if let Some((fuse_ino, lookup_key)) =
+                    inner
                         .inodes
-                        .get_by_key(&key)
-                        .map(|ovl_ino| ovl_ino.nodes.contains(&child_id))
-                        .unwrap_or(false);
-                    if node_registered {
-                        let path = inner.node_path(child_id);
-                        if let Ok(st) = inner.rpl_stat_with_path(child_id, -1, &self.config, &path)
-                        {
-                            inner.inodes.inc_lookup(&key);
-                            let mut attr = stat_to_attr(&st);
-                            attr.ino = INodeNo(fuse_ino);
-                            reply.entry(&timeout, &attr, Generation(0));
-                            return;
-                        }
+                        .lookup_registered(child_id, node.tmp_ino, node.tmp_dev)
+                {
+                    let path = inner.node_path(child_id);
+                    if let Ok(st) = inner.rpl_stat_with_path(child_id, -1, &self.config, &path) {
+                        inner.inodes.inc_lookup(&lookup_key);
+                        let entry_ttl = if inner.inodes.is_underlying_hardlink(fuse_ino) {
+                            Duration::ZERO
+                        } else {
+                            timeout
+                        };
+                        let mut attr = stat_to_attr(&st);
+                        attr.ino = INodeNo(fuse_ino);
+                        reply.entry(&entry_ttl, &attr, Generation(0));
+                        return;
                     }
                 }
             }
@@ -1547,17 +1563,14 @@ impl Filesystem for OverlayFs {
                 let tmp_ino = node.tmp_ino;
                 let tmp_dev = node.tmp_dev;
                 let is_dir = node.is_dir();
+                let is_lower = inner.layers[node.layer_idx].low;
 
                 let fuse_ino = if tmp_ino != 0 || is_dir {
                     let oi = &mut *inner;
-                    if let Some(ino_val) = oi
+                    if let Some((ino_val, key)) = oi
                         .inodes
-                        .register(&oi.nodes, node_id, tmp_ino, tmp_dev, st.st_mode)
+                        .register(&oi.nodes, node_id, tmp_ino, tmp_dev, st.st_mode, is_lower)
                     {
-                        let key = InodeKey {
-                            ino: tmp_ino,
-                            dev: tmp_dev,
-                        };
                         oi.inodes.inc_lookup(&key);
                         ino_val
                     } else {
@@ -1568,9 +1581,14 @@ impl Filesystem for OverlayFs {
                     u64::from(INodeNo::ROOT)
                 };
 
+                let entry_ttl = if inner.inodes.is_underlying_hardlink(fuse_ino) {
+                    Duration::ZERO
+                } else {
+                    timeout
+                };
                 let mut attr = stat_to_attr(&st);
                 attr.ino = INodeNo(fuse_ino);
-                reply.entry(&timeout, &attr, Generation(0));
+                reply.entry(&entry_ttl, &attr, Generation(0));
             }
             Err(e) => reply.error(Errno::from_i32(e.0)),
         }
@@ -1860,6 +1878,12 @@ impl Filesystem for OverlayFs {
             if let Err(e) = result {
                 reply.error(Errno::from_i32(e.0));
                 return;
+            }
+            if fd >= 0 {
+                if let Err(e) = clear_suid_sgid(fd) {
+                    reply.error(Errno::from_i32(e.0));
+                    return;
+                }
             }
         }
 
@@ -2640,6 +2664,11 @@ impl Filesystem for OverlayFs {
                 match layer.ds.openat(&path, open_flags, 0o700) {
                     Ok(safe_fd) => {
                         let owned_fd = safe_fd.into_owned();
+                        if (flags_raw & libc::O_TRUNC) != 0 {
+                            if let Some(notifier) = self.notifier.get() {
+                                let _ = notifier.inval_inode(INodeNo(ino), -1, 0);
+                            }
+                        }
                         drop(inner);
                         self.reply_open_maybe_passthrough(ino, owned_fd, reply);
                         return;
@@ -2678,6 +2707,11 @@ impl Filesystem for OverlayFs {
         match layer.ds.openat(&path, open_flags, 0o700) {
             Ok(safe_fd) => {
                 let owned_fd = safe_fd.into_owned();
+                if (flags_raw & libc::O_TRUNC) != 0 {
+                    if let Some(notifier) = self.notifier.get() {
+                        let _ = notifier.inval_inode(INodeNo(ino), -1, 0);
+                    }
+                }
                 drop(inner);
                 self.reply_open_maybe_passthrough(ino, owned_fd, reply);
             }
@@ -2763,6 +2797,8 @@ impl Filesystem for OverlayFs {
                     Ok(n) => {
                         if let Some(mode) = restore_mode {
                             let _ = crate::sys::fs::fchmod(raw_fd, mode);
+                        } else {
+                            let _ = clear_suid_sgid(raw_fd);
                         }
                         reply.written(n as u32);
                     }
@@ -3364,14 +3400,12 @@ impl Filesystem for OverlayFs {
                     let tmp_ino = node.tmp_ino;
                     let tmp_dev = node.tmp_dev;
                     let nmode = node.mode;
+                    let is_lower = inner.layers[node.layer_idx].low;
                     let oi = &mut *inner;
-                    if let Some(ino_val) =
-                        oi.inodes.register(&oi.nodes, *nid, tmp_ino, tmp_dev, nmode)
+                    if let Some((ino_val, key)) = oi
+                        .inodes
+                        .register(&oi.nodes, *nid, tmp_ino, tmp_dev, nmode, is_lower)
                     {
-                        let key = InodeKey {
-                            ino: tmp_ino,
-                            dev: tmp_dev,
-                        };
                         oi.inodes.inc_lookup(&key);
                         ino_val
                     } else {
@@ -3405,11 +3439,16 @@ impl Filesystem for OverlayFs {
                 },
             };
             a.ino = INodeNo(fuse_ino);
+            let entry_ttl = if inner.inodes.is_underlying_hardlink(fuse_ino) {
+                Duration::ZERO
+            } else {
+                ttl
+            };
             if reply.add(
                 INodeNo(fuse_ino),
                 (*i + 1) as u64,
                 OsStr::from_bytes(name),
-                &ttl,
+                &entry_ttl,
                 &a,
                 Generation(0),
             ) {
@@ -3549,7 +3588,10 @@ impl Filesystem for OverlayFs {
                 match crate::sys::fs::fallocate(fd.as_raw_fd(), mode, offset as i64, length as i64)
                 {
                     Err(e) => reply.error(Errno::from_i32(e.0)),
-                    Ok(()) => reply.ok(),
+                    Ok(()) => {
+                        let _ = clear_suid_sgid(fd.as_raw_fd());
+                        reply.ok();
+                    }
                 }
             }
         }
@@ -3619,7 +3661,10 @@ impl Filesystem for OverlayFs {
             capped_len,
         ) {
             Err(e) => reply.error(Errno::from_i32(e.0)),
-            Ok(n) => reply.written(std::cmp::min(n, u32::MAX as usize) as u32),
+            Ok(n) => {
+                let _ = clear_suid_sgid(fd_out.as_raw_fd());
+                reply.written(std::cmp::min(n, u32::MAX as usize) as u32);
+            }
         }
     }
 

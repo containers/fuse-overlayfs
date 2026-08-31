@@ -1,3 +1,14 @@
+* fuse-overlayfs-1.18
+
+- main: fix operations on hardlinked lower-layer files resolving
+  to the wrong layer (CVE-2026-77478).
+
+* fuse-overlayfs-1.17
+
+- main: clear SUID/SGID bits on truncate (CVE-2026-52791).
+- main: make sure st_ino is unique for all inodes on a device.
+- man: uniformly apply bold attributes.
+
 * fuse-overlayfs-1.16
 
 - main: fix incorrect directory entries due to unstable iteration

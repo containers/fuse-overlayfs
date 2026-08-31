@@ -219,4 +219,110 @@ grep binary_content merged/usr/bin/perl5.36.0
 umount merged
 rm -rf lower upper workdir merged
 
+# ========================================
+# Test 10: chmod on hardlinked lower-layer file (same dir, 2 links)
+# ========================================
+echo "=== Test 10: chmod on hardlinked lower file (2 links, same dir) ==="
+mkdir -p lower/d upper workdir merged
+
+echo x > lower/d/a
+ln lower/d/a lower/d/b
+chmod 664 lower/d/a
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+# Force directory load so both hardlink nodes are registered
+ls merged/d/ > /dev/null
+chmod go-w merged/d/a
+test "$(stat -c %a merged/d/a)" = "644"
+
+# Verify the correct file was copied up (not d/b)
+umount merged
+test -f upper/d/a
+test "$(stat -c %a upper/d/a)" = "644"
+rm -rf lower upper workdir merged
+
+# ========================================
+# Test 11: chmod on hardlinked lower-layer file (cross-dir, 3 links)
+# ========================================
+echo "=== Test 11: chmod on hardlinked lower file (3 links, cross-dir) ==="
+mkdir -p lower/o lower/usr/lib lower/usr/share/x upper workdir merged
+
+echo x > lower/o/orig
+ln lower/o/orig lower/usr/lib/link
+ln lower/o/orig lower/usr/share/x/l3
+chmod 664 lower/o/orig
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+# Force all dirs loaded so all three hardlink nodes are registered
+ls merged/o/ merged/usr/lib/ merged/usr/share/x/ > /dev/null
+chmod go-w merged/usr/lib/link
+test "$(stat -c %a merged/usr/lib/link)" = "644"
+
+# Verify the correct file was copied up (not o/orig or usr/share/x/l3)
+umount merged
+test -f upper/usr/lib/link
+test "$(stat -c %a upper/usr/lib/link)" = "644"
+rm -rf lower upper workdir merged
+
+# ========================================
+# Test 12: chmod with multi-layer hardlinks
+# ========================================
+echo "=== Test 12: chmod with hardlinks across overlay layers ==="
+mkdir -p l2/d l1/d upper workdir merged
+
+echo x > l1/d/a
+ln l1/d/a l1/d/b
+chmod 664 l1/d/a
+
+# l2 has a copy of d/a with new mode (simulating a previous copy-up)
+cp l1/d/a l2/d/a
+chmod 644 l2/d/a
+
+fuse-overlayfs -o lowerdir=l2:l1,upperdir=upper,workdir=workdir merged
+
+# d/a should show mode from higher-priority layer l2 (644), not l1 (664)
+test "$(stat -c %a merged/d/a)" = "644"
+
+# Access both links to force inode registration of both, then re-check
+stat merged/d/b > /dev/null
+test "$(stat -c %a merged/d/a)" = "644"
+
+umount merged
+rm -rf l1 l2 upper workdir merged
+
+# ========================================
+# Test 13: simulate podman layer commit with hardlinks
+# ========================================
+echo "=== Test 13: podman-style layer commit with hardlinks ==="
+mkdir -p l1/d upper1 workdir1 merged1
+
+echo x > l1/d/a
+ln l1/d/a l1/d/b
+chmod 664 l1/d/a
+
+fuse-overlayfs -o lowerdir=l1,upperdir=upper1,workdir=workdir1 merged1
+
+# Simulate podman: readdir then chmod
+ls merged1/d/ > /dev/null
+chmod go-w merged1/d/a
+umount merged1
+
+# Verify correct file was copied up to the layer
+test -f upper1/d/a
+test "$(stat -c %a upper1/d/a)" = "644"
+
+# Now mount L2 over L1 (simulates running the built image)
+mkdir -p upper2 workdir2 merged2
+fuse-overlayfs -o lowerdir=upper1:l1,upperdir=upper2,workdir=workdir2 merged2
+
+# Both before and after readdir, d/a must show 644
+test "$(stat -c %a merged2/d/a)" = "644"
+ls merged2/d/ > /dev/null
+test "$(stat -c %a merged2/d/a)" = "644"
+
+umount merged2
+rm -rf l1 upper1 upper2 workdir1 workdir2 merged1 merged2
+
 echo "All hard link tests passed!"
