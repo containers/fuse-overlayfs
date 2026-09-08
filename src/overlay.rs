@@ -782,6 +782,18 @@ impl OverlayInner {
         self.load_dir_impl(parent_id, path, None, config);
     }
 
+    /// Deepest layer a directory can pull entries from.  The synthetic root is
+    /// present in every layer, so it always merges all of them; any other
+    /// directory stops at the last layer it was actually found in, including
+    /// layer 0 for upper-only or opaque directories.
+    fn dir_last_layer(&self, node_id: NodeId) -> Option<usize> {
+        if node_id == self.root_id {
+            Some(self.layers.len().saturating_sub(1))
+        } else {
+            self.nodes.get(&node_id).map(|n| n.last_layer_idx)
+        }
+    }
+
     /// Shared implementation for loading directory entries from all layers.
     /// `last_layer_stop`: if Some(idx), stop after processing that layer index.
     fn load_dir_impl(
@@ -797,10 +809,7 @@ impl OverlayInner {
             if stop_lookup {
                 break;
             }
-            if let Some(last) = last_layer_stop
-                && last == layer_idx
-                && layer_idx > 0
-            {
+            if last_layer_stop == Some(layer_idx) {
                 stop_lookup = true;
             }
 
@@ -991,7 +1000,7 @@ impl OverlayInner {
         _config: &OverlayConfig,
     ) -> Option<NodeId> {
         let parent_path = self.node_path(parent_id);
-        let last_layer_idx = self.nodes.get(&parent_id)?.last_layer_idx;
+        let last_layer_idx = self.dir_last_layer(parent_id)?;
         let mut found_node: Option<OvlNode> = None;
         let mut stop_lookup = false;
 
@@ -999,7 +1008,7 @@ impl OverlayInner {
             if stop_lookup {
                 break;
             }
-            if last_layer_idx == layer_idx && layer_idx > 0 {
+            if last_layer_idx == layer_idx {
                 stop_lookup = true;
             }
 
@@ -1122,8 +1131,8 @@ impl OverlayInner {
         }
 
         let path = self.node_path(node_id);
-        let last_layer = match self.nodes.get(&node_id) {
-            Some(n) => n.last_layer_idx,
+        let last_layer = match self.dir_last_layer(node_id) {
+            Some(l) => l,
             None => return false,
         };
 
@@ -2046,10 +2055,10 @@ impl Filesystem for OverlayFs {
                     return;
                 }
             };
-        let pnode_last_layer = match inner.node(&pnode_id) {
-            Ok(n) => n.last_layer_idx,
-            Err(e) => {
-                reply.error(Errno::from_i32(e.0));
+        let pnode_last_layer = match inner.dir_last_layer(pnode_id) {
+            Some(l) => l,
+            None => {
+                reply.error(Errno::ENOENT);
                 return;
             }
         };

@@ -345,4 +345,41 @@ grep from_l3 merged/samefile
 umount merged
 rm -rf lower1 lower2 lower3 upper workdir merged
 
+# ========================================
+# Test 16: Recreated directory keeps hiding lower entries at every level
+# https://github.com/containers/fuse-overlayfs/issues/478
+# ========================================
+echo "=== Test 16: Recreated directory hides lower entries ==="
+mkdir -p lower/d/sub upper workdir merged
+echo "lower" > lower/d/top
+echo "lower" > lower/d/sub/file
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+rm -r merged/d
+mkdir -p merged/d/sub
+
+# Removing an entry drops the cached child list, forcing a lazy re-lookup:
+# the opaque boundary must still hide the lower entries.
+touch merged/d/x && rm merged/d/x
+test ! -e merged/d/top
+test "$(ls -A merged/d)" = "sub"
+
+touch merged/d/sub/x && rm merged/d/sub/x
+test ! -e merged/d/sub/file
+test -z "$(ls -A merged/d/sub)"
+rmdir merged/d/sub
+
+umount merged
+
+# The boundary must survive a remount, i.e. be recorded in the upper layer.
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+test ! -e merged/d/top
+test ! -e merged/d/sub
+test -z "$(ls -A merged/d)"
+
+umount merged
+rm -rf lower upper workdir merged
+
 echo "All directory operation tests passed!"
