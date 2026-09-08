@@ -201,13 +201,21 @@ impl OverlayFs {
     /// Try to open a file with FUSE passthrough; fall back to normal open.
     /// Reuses BackingId for the same FUSE inode (kernel requires same backing
     /// for concurrent opens of the same inode).
-    fn reply_open_maybe_passthrough(&self, ino: u64, fd: OwnedFd, reply: ReplyOpen) {
+    /// `may_passthrough` must be false when a copy-up could still replace the
+    /// file behind `ino`, see [`OverlayInner::may_passthrough`].
+    fn reply_open_maybe_passthrough(
+        &self,
+        ino: u64,
+        fd: OwnedFd,
+        may_passthrough: bool,
+        reply: ReplyOpen,
+    ) {
         let mut fuse_flags = FopenFlags::empty();
         if self.config.timeout > 0.0 {
             fuse_flags |= FopenFlags::FOPEN_KEEP_CACHE;
         }
 
-        if self.passthrough_enabled.load(Ordering::Relaxed) {
+        if may_passthrough && self.passthrough_enabled.load(Ordering::Relaxed) {
             // Check if we already have a BackingId for this inode (concurrent open).
             // Use a single write lock to avoid TOCTOU race with concurrent release().
             {
@@ -1239,6 +1247,30 @@ impl OverlayInner {
 
     fn upper_layer(&self) -> Option<&OvlLayer> {
         self.layers.first().filter(|l| !l.low)
+    }
+
+    /// Whether the file behind `node_id` may be handed to the kernel as a
+    /// FUSE passthrough backing.
+    ///
+    /// The kernel binds one backing file per inode and keeps routing I/O to it
+    /// for as long as any passthrough handle is open, so a copy-up that happens
+    /// meanwhile leaves the kernel reading and *writing* the read-only lower
+    /// file.  It cannot be repaired either, because it insists that all opens
+    /// of an inode agree on passthrough or none of them use it, so we cannot
+    /// switch the inode over to plain FUSE I/O once a backing exists.
+    ///
+    /// The answer must therefore stay the same for the whole life of the inode,
+    /// which rules out `layer_idx`: copy-up resets it to 0 and the same inode
+    /// would flip from cached to passthrough halfway through.  `last_layer_idx`
+    /// survives copy-up, so `== 0` means the name exists on the top layer only
+    /// and nothing can ever replace the file behind it.  A mount without an
+    /// upper layer cannot copy up at all, so everything there qualifies.
+    fn may_passthrough(&self, node_id: NodeId) -> bool {
+        self.upper_layer().is_none()
+            || self
+                .nodes
+                .get(&node_id)
+                .is_some_and(|n| n.last_layer_idx == 0)
     }
 
     /// Ensure a node is on the upper layer (copy-up if needed).
@@ -2678,8 +2710,9 @@ impl Filesystem for OverlayFs {
                                 let _ = notifier.inval_inode(INodeNo(ino), -1, 0);
                             }
                         }
+                        let may_passthrough = inner.may_passthrough(node_id);
                         drop(inner);
-                        self.reply_open_maybe_passthrough(ino, owned_fd, reply);
+                        self.reply_open_maybe_passthrough(ino, owned_fd, may_passthrough, reply);
                         return;
                     }
                     Err(e) => {
@@ -2721,8 +2754,9 @@ impl Filesystem for OverlayFs {
                         let _ = notifier.inval_inode(INodeNo(ino), -1, 0);
                     }
                 }
+                let may_passthrough = inner.may_passthrough(node_id);
                 drop(inner);
-                self.reply_open_maybe_passthrough(ino, owned_fd, reply);
+                self.reply_open_maybe_passthrough(ino, owned_fd, may_passthrough, reply);
             }
             Err(e) => reply.error(Errno::from_i32(e.0)),
         }
