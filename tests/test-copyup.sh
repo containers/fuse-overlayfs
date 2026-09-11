@@ -274,4 +274,37 @@ test "$merged_mode" = "750" || { echo "FAIL: expected merged 750, got $merged_mo
 umount merged
 rm -rf lower upper workdir merged
 
+# ========================================
+# Test 12: Copy-up while the file is open for reading
+# ========================================
+echo "=== Test 12: Copy-up with a reader holding the file open ==="
+mkdir -p lower upper workdir merged
+
+printf "AAAA" > lower/f
+printf "AAAA" > lower/g
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+# The reader is opened before the write, so the copy-up happens while it is
+# live.  The write must land in the upper layer, never in the read-only lower
+# one, and must be visible through the merged view.
+exec 9< merged/f
+printf "BBBB" >> merged/f
+exec 9<&-
+
+test "$(cat lower/f)" = "AAAA" || { echo "FAIL: lower layer was modified"; exit 1; }
+test "$(cat upper/f)" = "AAAABBBB" || { echo "FAIL: upper is $(cat upper/f)"; exit 1; }
+test "$(cat merged/f)" = "AAAABBBB" || { echo "FAIL: merged is $(cat merged/f)"; exit 1; }
+
+# Same with the reader outliving the write.
+exec 9< merged/g
+printf "BBBB" >> merged/g
+test "$(cat merged/g)" = "AAAABBBB" || { echo "FAIL: merged is $(cat merged/g)"; exit 1; }
+exec 9<&-
+test "$(cat lower/g)" = "AAAA" || { echo "FAIL: lower layer was modified"; exit 1; }
+test "$(cat upper/g)" = "AAAABBBB" || { echo "FAIL: upper is $(cat upper/g)"; exit 1; }
+
+umount merged
+rm -rf lower upper workdir merged
+
 echo "All copy-up tests passed!"
