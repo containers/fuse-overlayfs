@@ -19,13 +19,16 @@ $ fuse-overlayfs -o uidmapping=0:10:100:100:10000:2000,gidmapping=0:10:100:100:1
 Requirements:
 =======================================================
 
-Your system needs `libfuse` >= v3.2.1.
+Building requires Rust 1.85 or newer and Cargo. On Linux, this implementation
+uses the pure-Rust FUSE backend, so `libfuse` development packages are not
+required.
 
-* On Fedora: `dnf install fuse3-devel`
-* On Ubuntu >= 19.04: `apt install libfuse3-dev`
+Running requires Linux FUSE kernel support and access to `/dev/fuse`. Unprivileged
+mounts also require the system's FUSE mount setup (typically `fusermount3`) or
+appropriate privileges.
 
-Also, please note that, when using `fuse-overlayfs` **from a user namespace**
-(for example, when using rootless `podman`) a Linux Kernel >= v4.18.0 is required.
+When using `fuse-overlayfs` **from a user namespace** (for example, with rootless
+`podman`), Linux kernel >= v4.18.0 is required.
 
 
 Building:
