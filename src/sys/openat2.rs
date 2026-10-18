@@ -99,7 +99,22 @@ pub fn safe_openat(
 ) -> FsResult<SafeFd> {
     let c_path = crate::error::cstr_bytes(pathname)?;
 
-    let ret = syscall_openat2(dirfd, &c_path, flags as u64, mode as u64, RESOLVE_IN_ROOT);
+    let open_flags = flags as u64;
+    let mut ret = syscall_openat2(dirfd, &c_path, open_flags, mode as u64, RESOLVE_IN_ROOT);
+    if ret < 0
+        && open_flags & libc::O_NOATIME as u64 != 0
+        && std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    {
+        // O_NOATIME is an optimization. UID mappings can make stat report the
+        // caller as the owner even though the lower file has a different owner.
+        ret = syscall_openat2(
+            dirfd,
+            &c_path,
+            open_flags & !(libc::O_NOATIME as u64),
+            mode as u64,
+            RESOLVE_IN_ROOT,
+        );
+    }
     if ret >= 0 {
         // SAFETY: ret is a valid, newly-opened fd returned by the kernel.
         return Ok(SafeFd(unsafe { OwnedFd::from_raw_fd(ret) }));
