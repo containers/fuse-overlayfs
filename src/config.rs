@@ -95,6 +95,7 @@ const FUSE_PASSTHROUGH_OPTS: &[&str] = &[
     "allow_root",
     "default_permissions",
     "allow_other",
+    "auto_unmount",
     "suid",
     "nosuid",
     "dev",
@@ -444,6 +445,9 @@ fn print_help(program: &str) {
     println!("    -o xattr_permissions=MODE  xattr permission mode (0, 1, 2)");
     println!("    -o static_nlink            use static nlink=1");
     println!("    -o noacl                   disable ACL support");
+    println!(
+        "    -o auto_unmount            unmount when the process exits (requires allow_other or allow_root)"
+    );
     println!("    -o xino=off|auto|on        NFS file handles mode");
     println!("    -o volatile                disable fsync");
     println!("    -o plugins=PATH            plugin shared objects");
@@ -504,6 +508,18 @@ mod tests {
         assert_eq!(config.upperdir.as_deref(), Some("/upper"));
         assert_eq!(config.workdir.as_deref(), Some("/work"));
         assert_eq!(config.mountpoint.as_deref(), Some("/mnt"));
+    }
+
+    #[test]
+    fn test_parse_args_auto_unmount() {
+        let args: Vec<String> = vec![
+            "fuse-overlayfs".into(),
+            "-o".into(),
+            "auto_unmount,lowerdir=/a".into(),
+            "/mnt".into(),
+        ];
+        let config = parse_args(&args).unwrap();
+        assert!(config.fuse_options.iter().any(|opt| opt == "auto_unmount"));
     }
 
     #[test]

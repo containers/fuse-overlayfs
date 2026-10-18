@@ -79,6 +79,12 @@ any directory is 1.
 Disable ACL support in the FUSE file system.
 
 .TP
+\fB\-o auto\_unmount\fP
+Automatically unmount the filesystem when the fuse-overlayfs process exits.
+This option requires \fBallow_other\fP or \fBallow_root\fP. For unprivileged users,
+\fBallow_other\fP must also be enabled in \fB/etc/fuse.conf\fP.
+
+.TP
 \fB\-o xino\fP=\fBoff\fP|\fBauto\fP|\fBon\fP
 Controls how \fB\fCst\_ino\fR values are generated for files returned by
 fuse\-overlayfs. When all lower and upper layers reside on the same underlying
