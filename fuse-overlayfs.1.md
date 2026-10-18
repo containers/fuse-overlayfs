@@ -63,6 +63,11 @@ any directory is 1.
 **-o noacl**
 :   Disable ACL support in the FUSE file system.
 
+**-o auto_unmount**
+:   Automatically unmount the filesystem when the fuse-overlayfs process exits.
+This option requires **allow_other** or **allow_root**. For unprivileged users,
+**allow_other** must also be enabled in /etc/fuse.conf.
+
 **-o xino**=**off**|**auto**|**on**
 :   Controls how `st_ino` values are generated for files returned by
 fuse-overlayfs. When all lower and upper layers reside on the same underlying

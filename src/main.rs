@@ -133,37 +133,7 @@ fn main() {
     }
 
     // Build mount options and ACL for fuser from parsed config
-    let mut fuse_options = vec![fuser::MountOption::FSName("fuse-overlayfs".to_string())];
-    let mut acl = fuser::SessionACL::Owner;
-
-    for opt in &config.fuse_options {
-        match opt.as_str() {
-            "default_permissions" => fuse_options.push(fuser::MountOption::DefaultPermissions),
-            "allow_other" => acl = fuser::SessionACL::All,
-            "allow_root" => acl = fuser::SessionACL::RootAndOwner,
-            "ro" => fuse_options.push(fuser::MountOption::RO),
-            "suid" => fuse_options.push(fuser::MountOption::Suid),
-            "nosuid" => fuse_options.push(fuser::MountOption::NoSuid),
-            "dev" => fuse_options.push(fuser::MountOption::Dev),
-            "nodev" => fuse_options.push(fuser::MountOption::NoDev),
-            "exec" => fuse_options.push(fuser::MountOption::Exec),
-            "noexec" => fuse_options.push(fuser::MountOption::NoExec),
-            "atime" => fuse_options.push(fuser::MountOption::Atime),
-            "noatime" => fuse_options.push(fuser::MountOption::NoAtime),
-            "diratime" => fuse_options.push(fuser::MountOption::CUSTOM("diratime".to_string())),
-            "nodiratime" => fuse_options.push(fuser::MountOption::CUSTOM("nodiratime".to_string())),
-            "debug" => fuse_options.push(fuser::MountOption::CUSTOM("debug".to_string())),
-            other if other.starts_with("max_write=") => {
-                fuse_options.push(fuser::MountOption::CUSTOM(other.to_string()));
-            }
-            other if other.starts_with("fsname=") => {
-                // Already set FSName above, skip duplicate
-            }
-            other => {
-                fuse_options.push(fuser::MountOption::CUSTOM(other.to_string()));
-            }
-        }
-    }
+    let (fuse_options, acl) = build_fuse_mount_options(&config.fuse_options);
 
     // SELinux context= is consumed by config parsing (not passed to FUSE),
     // matching the C code's fuse_opt_parse template behavior.
@@ -224,6 +194,58 @@ fn main() {
     if let Err(e) = bg.join() {
         error!("session error: {}", e);
         std::process::exit(1);
+    }
+}
+
+fn build_fuse_mount_options(options: &[String]) -> (Vec<fuser::MountOption>, fuser::SessionACL) {
+    let mut fuse_options = vec![fuser::MountOption::FSName("fuse-overlayfs".to_string())];
+    let mut acl = fuser::SessionACL::Owner;
+
+    for opt in options {
+        match opt.as_str() {
+            "default_permissions" => fuse_options.push(fuser::MountOption::DefaultPermissions),
+            "allow_other" => acl = fuser::SessionACL::All,
+            "allow_root" => acl = fuser::SessionACL::RootAndOwner,
+            "auto_unmount" => fuse_options.push(fuser::MountOption::AutoUnmount),
+            "ro" => fuse_options.push(fuser::MountOption::RO),
+            "suid" => fuse_options.push(fuser::MountOption::Suid),
+            "nosuid" => fuse_options.push(fuser::MountOption::NoSuid),
+            "dev" => fuse_options.push(fuser::MountOption::Dev),
+            "nodev" => fuse_options.push(fuser::MountOption::NoDev),
+            "exec" => fuse_options.push(fuser::MountOption::Exec),
+            "noexec" => fuse_options.push(fuser::MountOption::NoExec),
+            "atime" => fuse_options.push(fuser::MountOption::Atime),
+            "noatime" => fuse_options.push(fuser::MountOption::NoAtime),
+            "diratime" => fuse_options.push(fuser::MountOption::CUSTOM("diratime".to_string())),
+            "nodiratime" => fuse_options.push(fuser::MountOption::CUSTOM("nodiratime".to_string())),
+            "debug" => fuse_options.push(fuser::MountOption::CUSTOM("debug".to_string())),
+            other if other.starts_with("max_write=") => {
+                fuse_options.push(fuser::MountOption::CUSTOM(other.to_string()));
+            }
+            other if other.starts_with("fsname=") => {
+                // Already set FSName above, skip duplicate
+            }
+            other => {
+                fuse_options.push(fuser::MountOption::CUSTOM(other.to_string()));
+            }
+        }
+    }
+
+    (fuse_options, acl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_unmount_is_forwarded_as_a_fuser_option() {
+        let options = vec!["auto_unmount".to_string(), "allow_other".to_string()];
+        let (mount_options, acl) = build_fuse_mount_options(&options);
+
+        assert!(mount_options.contains(&fuser::MountOption::AutoUnmount));
+        assert!(!mount_options.contains(&fuser::MountOption::CUSTOM("auto_unmount".to_string())));
+        assert_eq!(acl, fuser::SessionACL::All);
     }
 }
 
