@@ -53,3 +53,19 @@ chmod 600 merged/file
 test $(podman unshare stat -c %u:%g merged/file) = 0:1
 
 fusermount -u merged || [ $? -eq "${EXPECT_UMOUNT_STATUS:-0}" ]
+
+# O_NOATIME must not fail when uid mapping presents the lower file as ours.
+mkdir -p noatime-merged
+fuse-overlayfs -o "lowerdir=/etc,uidmapping=0:$(id -u):1,gidmapping=0:$(id -g):1" noatime-merged
+trap 'fusermount -u noatime-merged >/dev/null 2>&1 || true' EXIT
+python3 - <<'PY'
+import os
+
+path = "noatime-merged/passwd"
+assert os.stat(path).st_uid == os.getuid()
+fd = os.open(path, os.O_RDONLY | os.O_NOATIME)
+os.close(fd)
+PY
+fusermount -u noatime-merged
+trap - EXIT
+rmdir noatime-merged
