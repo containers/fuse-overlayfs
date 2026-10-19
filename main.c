@@ -1866,6 +1866,18 @@ load_dir (struct ovl_data *lo, struct ovl_node *n, struct ovl_layer *layer, char
           child = hash_lookup (n->children, &key);
           if (child)
             {
+              if (it != upper_layer && upper_layer && child->last_layer == upper_layer && node_dirp (child))
+                {
+                  ret = is_directory_opaque (upper_layer, child->path);
+                  if (ret < 0 && errno != ENOENT && errno != ENOTDIR)
+                    {
+                      it->ds->closedir (dp);
+                      return NULL;
+                    }
+                  if (ret > 0)
+                    continue;
+                }
+
               child->last_layer = it;
               if (! child->whiteout || it != upper_layer)
                 continue;
