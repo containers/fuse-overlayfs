@@ -345,4 +345,35 @@ grep from_l3 merged/samefile
 umount merged
 rm -rf lower1 lower2 lower3 upper workdir merged
 
+# ========================================
+# Test 16: Preserve opaque child after parent reload
+# ========================================
+echo "=== Test 16: Opaque child survives parent reload ==="
+mkdir -p lower/P/d upper workdir merged
+echo "lower" > lower/P/d/X
+echo "y" > lower/P/Y
+
+# Make P/d opaque in the upper layer, then remount to exercise cached reloads.
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+rm -rf merged/P/d
+mkdir merged/P/d
+echo "upper" > merged/P/d/X
+umount merged
+
+fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+test "$(cat merged/P/d/X)" = "upper"
+rm merged/P/Y
+# The failed rmdir reloads P while its opaque child remains.
+if rmdir merged/P 2>/dev/null; then
+    echo "ERROR: P should still contain the opaque directory"
+    exit 1
+fi
+rm merged/P/d/X
+test ! -e merged/P/d/X
+echo "replacement" > merged/P/d/X
+test "$(cat merged/P/d/X)" = "replacement"
+
+umount merged
+rm -rf lower upper workdir merged
+
 echo "All directory operation tests passed!"
