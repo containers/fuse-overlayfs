@@ -231,4 +231,33 @@ done
 umount merged
 rm -rf lower upper workdir merged
 
+# ========================================
+# Test 11: Directory copy-up preserves inode across remount
+# ========================================
+echo "=== Test 11: Directory copy-up preserves inode across remount ==="
+mkdir -p lower upper workdir merged
+
+# The upper filesystem must support user xattrs for origin tracking.
+if setfattr -n user.fuseoverlayfs.test -v yes upper 2>/dev/null; then
+    setfattr -x user.fuseoverlayfs.test upper
+    mkdir -p lower/origin_dir/nested
+    fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+
+    inode_before=$(stat -c %i lower/origin_dir)
+    nested_inode_before=$(stat -c %i lower/origin_dir/nested)
+    mkdir merged/origin_dir/nested/child
+    test "$(stat -c %i merged/origin_dir)" = "$inode_before"
+
+    # Remount discards cached nodes, forcing lookup from the stored origin.
+    umount merged
+    fuse-overlayfs -o lowerdir=lower,upperdir=upper,workdir=workdir merged
+    test "$(stat -c %i merged/origin_dir)" = "$inode_before"
+    test "$(stat -c %i merged/origin_dir/nested)" = "$nested_inode_before"
+    test -d merged/origin_dir/nested/child
+    umount merged
+else
+    echo "SKIP: upper filesystem does not support user xattrs"
+fi
+rm -rf lower upper workdir merged
+
 echo "All copy-up tests passed!"

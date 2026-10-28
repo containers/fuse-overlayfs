@@ -3046,7 +3046,7 @@ static int create_node_directory (struct ovl_data *lo, struct ovl_node *src);
 static int
 create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct timespec *times,
                   struct ovl_node *parent, struct ovl_layer *sl, int xattr_sfd,
-                  uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out)
+                  uid_t uid, gid_t gid, mode_t mode, bool set_opaque, struct stat *st_out, const char *origin)
 {
   int ret;
   int saved_errno;
@@ -3056,7 +3056,7 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   bool need_rename;
   mode_t backing_file_mode = mode | (lo->xattr_permissions ? 0755 : 0);
 
-  need_rename = set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->stat_override_mode != STAT_OVERRIDE_NONE;
+  need_rename = origin || set_opaque || times || xattr_sfd >= 0 || uid != lo->uid || gid != lo->gid || get_upper_layer (lo)->stat_override_mode != STAT_OVERRIDE_NONE;
   if (! need_rename)
     {
       /* mkdir can be used directly without a temporary directory in the working directory.  */
@@ -3134,6 +3134,15 @@ create_directory (struct ovl_data *lo, int dirfd, const char *name, const struct
   if (ret < 0)
     goto out;
 
+  /* Store the lower path before publishing a copied-up directory, as
+     copyup () does for files.  Failed writes leave the lower node intact.  */
+  if (origin)
+    {
+      ret = set_fd_origin (dfd, origin);
+      if (ret < 0)
+        goto out;
+    }
+
   ret = renameat (lo->workdir_fd, wd_tmp_file_name, dirfd, name);
   if (ret < 0)
     {
@@ -3203,7 +3212,7 @@ create_node_directory (struct ovl_data *lo, struct ovl_node *src)
   if (override_mode (src->layer, sfd, NULL, NULL, &st) < 0 && errno != ENODATA && errno != EOPNOTSUPP)
     return -1;
 
-  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, src->layer, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL);
+  ret = create_directory (lo, get_upper_layer (lo)->fd, src->path, times, src->parent, src->layer, sfd, st.st_uid, st.st_gid, st.st_mode, false, NULL, src->path);
   if (ret == 0)
     {
       src->layer = get_upper_layer (lo);
@@ -5289,7 +5298,7 @@ ovl_mkdir (fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode)
 
   ret = create_directory (lo, get_upper_layer (lo)->fd, path, NULL, pnode, NULL, -1,
                           get_uid (lo, ctx->uid), get_gid (lo, ctx->gid), mode & ~ctx->umask,
-                          true, &st);
+                          true, &st, NULL);
   if (ret < 0)
     {
       fuse_reply_err (req, errno);
