@@ -307,4 +307,27 @@ test "$(cat upper/g)" = "AAAABBBB" || { echo "FAIL: upper is $(cat upper/g)"; ex
 umount merged
 rm -rf lower upper workdir merged
 
+# ========================================
+# Test 13: Copy-up fsyncs the new upper file unless volatile
+# ========================================
+echo "=== Test 13: Copy-up is durable ==="
+if command -v strace >/dev/null 2>&1; then
+    for opts in "" "volatile,"; do
+        mkdir -p lower upper workdir merged
+        echo data > lower/file
+        strace -f -qq -e trace=fsync,fdatasync -o fsync.log \
+            fuse-overlayfs -f -o "${opts}lowerdir=lower,upperdir=upper,workdir=workdir" merged &
+        for i in $(seq 50); do mountpoint -q merged && break; sleep 0.1; done
+        echo more >> merged/file
+        umount merged
+        wait
+        n=$(grep -c fsync fsync.log || true)
+        if [ -z "$opts" ]; then test "$n" -ge 1; else test "$n" -eq 0; fi
+        printf 'data\nmore\n' | cmp - upper/file
+        rm -rf lower upper workdir merged fsync.log
+    done
+else
+    echo "strace not found, skipping"
+fi
+
 echo "All copy-up tests passed!"
