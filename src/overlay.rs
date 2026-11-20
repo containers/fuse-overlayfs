@@ -120,6 +120,8 @@ struct OverlayInner {
     overflow: OverflowIds,
     wd_counter: u64,
     can_mknod: bool,
+    /// fsync copied-up files before they become visible (`config.fsync`).
+    sync_copyup: bool,
 }
 
 struct DirHandle {
@@ -150,6 +152,7 @@ impl OverlayFs {
 
         let mut inodes = InodeTable::new();
         inodes.set_same_device(ino_passthrough);
+        let sync_copyup = config.fsync;
 
         OverlayFs {
             config,
@@ -163,6 +166,7 @@ impl OverlayFs {
                 overflow,
                 wd_counter: 1,
                 can_mknod: std::env::var("FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT").is_err(),
+                sync_copyup,
             }),
             open_files: RwLock::new(FxHashMap::default()),
             next_fh: AtomicU64::new(1),
@@ -1292,6 +1296,7 @@ impl OverlayInner {
             node_id,
             self.workdir_fd,
             &mut self.wd_counter,
+            self.sync_copyup,
         )
     }
 

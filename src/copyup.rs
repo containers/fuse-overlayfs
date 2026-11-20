@@ -253,12 +253,17 @@ pub fn create_node_directory(
 
 /// Copy a file from a lower layer to the upper layer.
 /// After this call, node's layer_idx will be 0 (upper).
+///
+/// With `sync`, a regular file's data is flushed with fsync(2) before it is renamed
+/// into place, like kernel overlayfs's default `fsync=auto`: otherwise a crash can
+/// leave an empty or partial upper file that hides the intact lower one.
 pub fn copyup(
     layers: &[OvlLayer],
     nodes: &mut NodeArena,
     node_id: NodeId,
     workdir_fd: RawFd,
     wd_counter: &mut u64,
+    sync: bool,
 ) -> FsResult<()> {
     let upper = layers.first().ok_or(FsError(libc::EROFS))?;
     if upper.low {
@@ -395,6 +400,14 @@ pub fn copyup(
 
     // Restore original mode (file was created with mode | 0o200 for writing)
     let _ = crate::sys::fs::fchmod(dfd.as_raw_fd(), mode);
+
+    // Make the copy durable before it becomes visible (see `sync` above)
+    if sync {
+        if let Err(e) = crate::sys::io::fsync(dfd.as_raw_fd()) {
+            let _ = crate::sys::fs::unlinkat(workdir_fd, &c_wd_name, 0);
+            return Err(e);
+        }
+    }
 
     // Move to final location, safely resolve destination parent
     let (_dst_guard, dst_dirfd, c_dst_name) = openat2::open_parent_safe_cstr(upper_fd, &path)?;
